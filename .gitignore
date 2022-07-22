@@ -26,8 +26,11 @@
 #*.obj
 #
 
+intf.OpenMasterdata.inc
 Samples/Win32
 Samples/Win64
+Samples/configuration.ini
+Documentation/2021*
 
 # Delphi compiler-generated binaries (safe to delete)
 *.exe
@@ -67,5 +70,3 @@ __recovery/
 
 # Castalia statistics file (since XE7 Castalia is distributed with Delphi)
 *.stat
-
-Documentation
