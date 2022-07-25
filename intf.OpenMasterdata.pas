@@ -11,42 +11,28 @@ uses
   intf.OpenMasterdata.Types
   ;
 
-  //https://docwiki.embarcadero.com/RADStudio/Alexandria/de/REST-Clientbibliothek
-  //https://www.clevercomponents.com/portal/kb/a135/how-to-write-a-rest-client-with-json-in-delphi.aspx
-
 type
-//  TOpenMasterdataApiClient = class;
-//
-//  IOpenMasterdataApiClientResource_Auth = interface(IInvokable)
-//    ['{D139CD79-CFE5-49E3-8CFB-27686621311B}']
-//
-//    [RESTResource(TMVCHTTPMethodType.httpGET, '{baseUrlOAuth}')]
-//    function Login([Param('username')] _Username: String; [Param('password')] _Password: String; [Param('customernumber')] _CustomerNumber: String): TOpenMasterdataAPI_AuthResult;
-//
-//    //https://portal.mainmetall.de/oauth/login?grant_type=password&client_id=landrixsoftware&username=info@landrix.de&password=rxPKo9rRSUgjQHJSXsX4
-//
-//    function RefreshLogin: TOpenMasterdataAPI_AuthResult;
-//  end;
-//
-//  TOpenMasterdataApiClient_Auth = record
-//  private
-//    clientRef : TOpenMasterdataApiClient;
-//    RESTAdapter: TRESTAdapter<IOpenMasterdataApiClientResource_Auth>;
-//    AppResource: IOpenMasterdataApiClientResource_Auth;
-//  public
-//    constructor Create(_Client: TOpenMasterdataApiClient);
-//  public
-//    function Login(out _AccessToken : String; out _RefreshToken : String) : Boolean;
-//    function RefreshLogin(_RefreshToken : String; out _AccessToken : String; out _NewRefreshToken : String) : Boolean;
-//  end;
+  IOpenMasterdataApiClient = interface
+    ['{425FC785-64D4-4A17-A012-49F60448EBF8}']
 
-  TOpenMasterdataApiClient = class(TObject)
+    function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_BySupplierPIDResult) : Boolean;
+
+    procedure SetOAuthURL(const _URL : String);
+    procedure SetBySupplierPIDURL(const _URL : String);
+
+    function GetConnectionName : String;
+    function GetLastOAuthResponseContent : String;
+    function GetLastBySupplierPIDResponseContent : String;
+    function GetLastErrorMessage : String;
+  end;
+
+  TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
   private
     FCS : TCriticalSection;
     FUsername,
     FPassword,
     FCustomerNumber,
-    FOAuthURL, FBySupplierPIDURL : String;
+    FConnectionName : String;
 
     FAccessToken : String;
     FRefreshToken : String;
@@ -59,34 +45,74 @@ type
     FLastBySupplierPIDResponseContent : String;
     FLastErrorMessage : String;
 
-    procedure CheckResultBody(const _Body : String);
-    procedure SetBySupplierPIDURL(const Value: String);
-    procedure SetOAuthURL(const Value: String);
     function LoggedIn: Boolean;
     function Login : Boolean;
     function RefreshLogin : Boolean;
   public
-    constructor Create(_Username, _Password, _CustomerNumber : String);
+    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber : String);
     destructor Destroy; override;
   public
+    function GetConnectionName : String;
     function GetLastOAuthResponseContent : String;
     function GetLastBySupplierPIDResponseContent : String;
     function GetLastErrorMessage : String;
 
+    procedure SetOAuthURL(const _URL : String);
+    procedure SetBySupplierPIDURL(const _URL : String);
+
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_BySupplierPIDResult) : Boolean;
   public
-    property OAuthURL : String read FOAuthURL write SetOAuthURL;
-    property BySupplierPIDURL : String read FBySupplierPIDURL write SetBySupplierPIDURL;
+    class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
+    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber : String) : IOpenMasterdataApiClient;
   end;
 
 implementation
 
 {$I intf.OpenMasterdata.inc}
 
+var
+  openConnections : TInterfaceList;
+
 { TOpenMasterdataApiClient }
 
-constructor TOpenMasterdataApiClient.Create(_Username, _Password, _CustomerNumber : String);
+class function TOpenMasterdataApiClient.GetOpenMasterdataConnection(
+  _ConnectionName: String;
+  out _Connection: IOpenMasterdataApiClient): Boolean;
+var
+  i : Integer;
 begin
+  Result := false;
+
+  if openConnections = nil then
+    openConnections := TInterfaceList.Create;
+
+  for i := 0 to openConnections.Count-1 do
+  if SameText(_ConnectionName,IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+  begin
+    _Connection := IOpenMasterdataApiClient(openConnections[i]);
+    Result := true;
+    break;
+  end;
+end;
+
+class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
+  _ConnectionName, _Username, _Password,
+  _CustomerNumber: String): IOpenMasterdataApiClient;
+begin
+  if openConnections = nil then
+    openConnections := TInterfaceList.Create;
+
+  if GetOpenMasterdataConnection(_ConnectionName,Result) then
+    exit;
+
+  Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
+                  _CustomerNumber);
+  openConnections.Add(Result);
+end;
+
+constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username, _Password, _CustomerNumber : String);
+begin
+  FConnectionName := _ConnectionName;
   FUsername := _Username;
   FPassword := _Password;
   FCustomerNumber := _CustomerNumber;
@@ -150,8 +176,6 @@ var
   RESTRequest: TRESTRequest;
   minimalResult : TOpenMasterdataAPI_Result;
 
-  jValue:TJSONValue;
-  hstr : String;
   itm : TOpenMasterdataAPI_AuthResult;
 begin
   //https://github.com/paolo-rossi/delphi-neon
@@ -219,7 +243,7 @@ begin
 
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
-      IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
 
       Result := true;
     except
@@ -244,8 +268,6 @@ var
   RESTRequest: TRESTRequest;
   minimalResult : TOpenMasterdataAPI_Result;
 
-  jValue:TJSONValue;
-  hstr : String;
   itm : TOpenMasterdataAPI_AuthResult;
 begin
   //https://github.com/paolo-rossi/delphi-neon
@@ -311,7 +333,7 @@ begin
 
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
-      IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
 
       Result := true;
     except
@@ -337,8 +359,6 @@ var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
   minimalResult : TOpenMasterdataAPI_Result;
-  jValue:TJSONValue;
-  hstr : String;
 begin
   Result := false;
 
@@ -415,300 +435,33 @@ begin
     RESTResponse.Free;
   end;
 
-
   finally
     FCS.Release;
   end;
 end;
 
+function TOpenMasterdataApiClient.GetConnectionName: String;
+begin
+  Result := FConnectionName;
+end;
+
 procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
-  const Value: String);
+  const _URL : String);
 begin
-  FBySupplierPIDURL := Value;
-  FRESTClientBySupplierPID.BaseURL := Value;
+  FRESTClientBySupplierPID.BaseURL := _URL;
 end;
 
-procedure TOpenMasterdataApiClient.SetOAuthURL(const Value: String);
+procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
 begin
-  FOAuthURL := Value;
-  FRESTClientOAuth.BaseURL := Value;
+  FRESTClientOAuth.BaseURL := _URL;
 end;
 
-//procedure TLandrixApiClient.AnalyticsAddItem(_Item: TLandrixApiAnalytics);
-//var
-//  lResp: IMVCRESTResponse;
-//begin
-//  //FAppResource.AnalyticsAddItem(_Item);
-//
-//  FCS.Acquire;
-//  try
-//  lResp := FRESTClient
-//// .SetBasicAuthorization('dmvc', '123')
-//    .AddBody(GetDefaultSerializer.SerializeObject(_Item),TMVCMediaType.APPLICATION_JSON)
-//    //.AddBodyFieldURLEncoded('field2', 'João Antônio')
-//    //.AddBodyFieldURLEncoded('field3', 'Special characters: öüáàçãõºs')
-//    .Put('/analytics/'+_Item.uuid);
-//  finally
-//    FCS.Release;
-//  end;
-//
-//  //Assert.AreEqual(lResp.StatusCode, 200);
-//end;
-//
-//function TLandrixApiClient.AnalyticsGetItemsByNotAlreadyProcessed(
-//  out _Items: TObjectList<TLandrixApiAnalytics>): Boolean;
-//var
-//  lBody: string;
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .AddQueryStringParam('alreadyprocessed','0')
-//      .Get('/analytics');
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    lBody := res.Content;
-//
-//    CheckResultBody(lBody);
-//
-//    // Objects
-//    _Items := TObjectList<TLandrixApiAnalytics>.Create(True);
-//    GetDefaultSerializer.DeserializeCollection(lBody, _Items, TLandrixApiAnalytics); // BodyAsJSONArray.AsObjectList<TAppUser>;
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
-//
-//function TLandrixApiClient.AnalyticsGetItemsByProjectUUID(
-//  const _ProjectUUID : String; out _Items: TObjectList<TLandrixApiAnalytics>): Boolean;
-//var
-//  lBody: string;
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//  if _ProjectUUID = '' then
-//    exit;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .AddQueryStringParam('projectuuid',_ProjectUUID)
-//      .Get('/analytics');
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    lBody := res.Content;
-//
-//    CheckResultBody(lBody);
-//
-//    // Objects
-//    _Items := TObjectList<TLandrixApiAnalytics>.Create(True);
-//    GetDefaultSerializer.DeserializeCollection(lBody, _Items, TLandrixApiAnalytics); // BodyAsJSONArray.AsObjectList<TAppUser>;
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
-//
-procedure TOpenMasterdataApiClient.CheckResultBody(const _Body: String);
-begin
-  if Pos('ESQLite',_Body) > 0 then
-    raise Exception.Create(_Body);
-  if Pos('<html>',_Body) > 0 then
-    raise Exception.Create(_Body);
-end;
+initialization
 
-//function TLandrixApiClient.SettingPlainGetItem(const _SettingUUID,
-//  _UserUUID: String; out _Item: TLandrixApiSettingPlain): Boolean;
-//var
-//  lBody : String;
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//  if _SettingUUID = '' then
-//    exit;
-//  if _UserUUID = '' then
-//    exit;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .Get('/settings/plain/'+_SettingUUID+'/'+_UserUUID);
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    lBody := res.Content;
-//
-//    CheckResultBody(lBody);
-//
-//    // Objects
-//    _Item := TLandrixApiSettingPlain.Create;
-//    GetDefaultSerializer.DeserializeCollection(lBody, _Item, TLandrixApiSettingPlain); // BodyAsJSONArray.AsObjectList<TAppUser>;
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
-//
-//function TLandrixApiClient.EvaluationDeleteEvaluationHalfFinishedOrder(
-//  const _ProjectUUID, _Uuid: String): Boolean;
-//var
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//  if _ProjectUUID = '' then
-//    exit;
-//  if _Uuid = '' then
-//    exit;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .Delete('/projects/'+_ProjectUUID+'/evaluation/halffinishedorders/'+_Uuid);
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    CheckResultBody(res.Content);
-//
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
-//
-//function TLandrixApiClient.EvaluationGetEvaluationHalfFinishedOrders(
-//  const _ProjectUUID: String;
-//  out _Items: TObjectList<TLandrixApiProjectHalffinishedOrder>): Boolean;
-//var
-//  lBody: string;
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//  if _ProjectUUID = '' then
-//    exit;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .Get('/projects/'+_ProjectUUID+'/evaluation/halffinishedorders');
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    lBody := res.Content;
-//
-//    CheckResultBody(lBody);
-//
-//    // Objects
-//    _Items := TObjectList<TLandrixApiProjectHalffinishedOrder>.Create(True);
-//    GetDefaultSerializer.DeserializeCollection(lBody, _Items, TLandrixApiProjectHalffinishedOrder); // BodyAsJSONArray.AsObjectList<TAppUser>;
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
-//
-//function TLandrixApiClient.EvaluationSetEvaluationHalfFinishedOrder(
-//  _Item: TLandrixApiProjectHalffinishedOrder): Boolean;
-//var
-//  res : IMVCRESTResponse;
-//begin
-//  Result := false;
-//
-//  FCS.Acquire;
-//  try
-//  try
-//    res := FRESTClient
-//      .AddBody(GetDefaultSerializer.SerializeObject(_Item),TMVCMediaType.APPLICATION_JSON)
-//      .Put('/projects/'+_Item.projectUuid+'/evaluation/halffinishedorders/'+_Item.uuid);
-//  //  FRESTClient.SetBasicAuthorization('dmvc', '123');
-//
-//    if not res.Success then
-//      raise Exception.Create(res.Content);
-//
-//    CheckResultBody(res.Content);
-//
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    FCS.Release;
-//  end;
-//end;
+  openConnections := nil;
 
-//{ TOpenMasterdataApiClient_Auth }
-//
-//constructor TOpenMasterdataApiClient_Auth.Create(
-//  _Client: TOpenMasterdataApiClient);
-//begin
-//  clientRef := _Client;
-//  RESTAdapter := TRESTAdapter<IOpenMasterdataApiClientResource_Auth>.Create;
-//  RESTAdapter.Build(_Client.FRESTClient);
-//  AppResource := RESTAdapter.ResourcesService;
-//end;
-//
-//function TOpenMasterdataApiClient_Auth.Login(out _AccessToken,
-//  _RefreshToken: String): Boolean;
-//var
-//  itm : TOpenMasterdataAPI_AuthResult;
-//begin
-//  Result := false;
-//  clientRef.FCS.Acquire;
-//  try
-//  try
-//    itm := AppResource.Login(clientRef.FUsername,clientRef.FPassword,clientRef.FCustomerNumber);
-//    if not itm.success then
-//      exit;
-//    _AccessToken := itm.access_token;
-//    _RefreshToken := itm.refresh_token;
-//    Result := true;
-//  except
-//    on E:Exception do begin ShowException(E,nil) end;
-//  end;
-//  finally
-//    clientRef.FCS.Release;
-//  end;
-//end;
-//
-//function TOpenMasterdataApiClient_Auth.RefreshLogin(_RefreshToken: String;
-//  out _AccessToken, _NewRefreshToken: String): Boolean;
-//begin
-//
-//end;
+finalization
+
+  if Assigned(openConnections) then begin openConnections.Free; openConnections := nil; end;
 
 end.

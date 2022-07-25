@@ -93,7 +93,7 @@ end;
 
 procedure TMainForm.btBySupplierPidClick(Sender: TObject);
 var
-  client : TOpenMasterdataApiClient;
+  client : IOpenMasterdataApiClient;
   supplierPid : TOpenMasterdataAPI_BySupplierPIDResult;
   json : String;
 
@@ -112,22 +112,21 @@ begin
   if ListBox1.ItemIndex < 0 then
     exit;
 
-  client := TOpenMasterdataApiClient.Create(
+  if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
+  begin
+    client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
                Configuration.ReadString(ComboBox1.Text,'Customernumber',''));
-  client.OAuthURL := Configuration.ReadString(ComboBox1.Text,'OAuthURL','');
-  client.BySupplierPIDURL := Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL','');
+    client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
+    client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
+  end;
+  if client.GetBySupplierPid(ListBox1.Items[ListBox1.ItemIndex],TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,supplierPid) then
   try
-    if client.GetBySupplierPid(ListBox1.Items[ListBox1.ItemIndex],TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,supplierPid) then
-    try
-      json := GetDefaultSerializer.SerializeObject(supplierPid);
-      Memo1.Lines.Text := FormatJSON(json);
-    finally
-      supplierPid.Free;
-    end;
+    json := GetDefaultSerializer.SerializeObject(supplierPid);
+    Memo1.Lines.Text := FormatJSON(json);
   finally
-    client.Free;
+    supplierPid.Free;
   end;
 end;
 
