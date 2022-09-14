@@ -1,4 +1,23 @@
-﻿unit intf.OpenMasterdata;
+﻿{
+License OpenMasterdata-for-Delphi
+
+Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Sven Harazim, info@landrix.de
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+}
+unit intf.OpenMasterdata;
 
 interface
 
@@ -15,7 +34,7 @@ type
   IOpenMasterdataApiClient = interface
     ['{425FC785-64D4-4A17-A012-49F60448EBF8}']
 
-    function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_BySupplierPIDResult) : Boolean;
+    function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
 
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
@@ -27,12 +46,18 @@ type
   end;
 
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
+  private type
+    TOpenMasterdataApiClientGrantType = (omdgt_Password,omdgt_ClientCredentials);
   private
     FCS : TCriticalSection;
     FUsername,
     FPassword,
     FCustomerNumber,
+    FClientID,
+    FClientSecret,
     FConnectionName : String;
+
+    FGrantType : TOpenMasterdataApiClientGrantType;
 
     FAccessToken : String;
     FRefreshToken : String;
@@ -49,7 +74,7 @@ type
     function Login : Boolean;
     function RefreshLogin : Boolean;
   public
-    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber : String);
+    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret : String); overload;
     destructor Destroy; override;
   public
     function GetConnectionName : String;
@@ -60,15 +85,13 @@ type
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
 
-    function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_BySupplierPIDResult) : Boolean;
+    function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
-    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber : String) : IOpenMasterdataApiClient;
+    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret : String) : IOpenMasterdataApiClient;
   end;
 
 implementation
-
-{$I intf.OpenMasterdata.inc}
 
 var
   openConnections : TInterfaceList;
@@ -96,8 +119,8 @@ begin
 end;
 
 class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
-  _ConnectionName, _Username, _Password,
-  _CustomerNumber: String): IOpenMasterdataApiClient;
+  _ConnectionName, _Username, _Password, _CustomerNumber, _ClientID,
+  _ClientSecret: String): IOpenMasterdataApiClient;
 begin
   if openConnections = nil then
     openConnections := TInterfaceList.Create;
@@ -106,16 +129,23 @@ begin
     exit;
 
   Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-                  _CustomerNumber);
+                  _CustomerNumber,_ClientID,_ClientSecret);
   openConnections.Add(Result);
 end;
 
-constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username, _Password, _CustomerNumber : String);
+constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username,
+  _Password, _CustomerNumber, _ClientID, _ClientSecret: String);
 begin
   FConnectionName := _ConnectionName;
   FUsername := _Username;
   FPassword := _Password;
   FCustomerNumber := _CustomerNumber;
+  FClientID := _ClientID;
+  FClientSecret := _ClientSecret;
+  if not FClientSecret.IsEmpty then
+    FGrantType := TOpenMasterdataApiClient.TOpenMasterdataApiClientGrantType.omdgt_ClientCredentials
+  else
+    FGrantType := TOpenMasterdataApiClient.TOpenMasterdataApiClientGrantType.omdgt_Password;
   FCS := TCriticalSection.Create;
 
   FRESTClientOAuth:= TRESTClient.Create(nil);
@@ -167,14 +197,19 @@ begin
     Result := Login
   else
   if FAccessTokenValidTo <= now then
-    Result := RefreshLogin;
+  begin
+    if FRefreshToken.IsEmpty then
+      Result := Login
+    else
+      Result := RefreshLogin;
+  end;
 end;
 
 function TOpenMasterdataApiClient.Login: Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  minimalResult : TOpenMasterdataAPI_Result;
+  //minimalResult : TOpenMasterdataAPI_CoreResult;
 
   itm : TOpenMasterdataAPI_AuthResult;
 begin
@@ -187,6 +222,8 @@ begin
   FAccessToken := '';
   FRefreshToken := '';
 
+  //TOAuth2Authenticator?
+
   RESTResponse := TRESTResponse.Create(nil);
   RESTRequest := TRESTRequest.Create(nil);
   try
@@ -194,12 +231,26 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientOAuth;
-    RESTRequest.Params.AddItem('grant_type','password');
-    RESTRequest.Params.AddItem('client_id',OPENMASTERDATA_CLIENT_ID);
-    RESTRequest.Params.AddItem('username',FUsername);
+    RESTRequest.Method := rmPOST;
+    case FGrantType of
+      omdgt_Password:          RESTRequest.Params.AddItem('grant_type','password');
+      omdgt_ClientCredentials:
+      begin
+        RESTRequest.Params.AddItem('grant_type','client_credentials');
+        RESTRequest.Params.AddItem('client_secret',FClientSecret);
+      end;
+    end;
+    RESTRequest.Params.AddItem('client_id',FClientID);
+
+    if (FUsername <> '') and (FCustomerNumber <> '') then
+      RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
+    else
+    if (FCustomerNumber <> '') then
+      RESTRequest.Params.AddItem('username',FCustomerNumber)
+    else
+      RESTRequest.Params.AddItem('username',FUsername);
     RESTRequest.Params.AddItem('password',FPassword);
-    if FCustomerNumber <> '' then
-      RESTRequest.Params.AddItem('customernumber',FCustomerNumber);
+
     RESTRequest.Response := RESTResponse;
 
     RESTRequest.Execute;
@@ -212,25 +263,25 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    minimalResult := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
-      if not minimalResult.success then
-      begin
-        FLastErrorMessage := minimalResult.message_;
-        exit;
-      end;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      minimalResult.Free;
-    end;
+//   minimalResult := TOpenMasterdataAPI_CoreResult.Create;
+//    try
+//    try
+//      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
+//      if not minimalResult.success then
+//      begin
+//        FLastErrorMessage := minimalResult.message_;
+//        exit;
+//      end;
+//    except
+//      on E:Exception do
+//      begin
+//        FLastErrorMessage := E.ClassName+' '+e.Message;
+//        exit;
+//      end;
+//    end;
+//    finally
+//      minimalResult.Free;
+//    end;
 
     itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
@@ -238,7 +289,7 @@ begin
     try
       GetDefaultSerializer.DeserializeObject(RESTResponse.Content, itm);
 
-      if itm.access_token.IsEmpty or itm.refresh_token.IsEmpty then
+      if itm.access_token.IsEmpty then
         exit;
 
       FAccessToken := itm.access_token;
@@ -266,7 +317,7 @@ function TOpenMasterdataApiClient.RefreshLogin: Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  minimalResult : TOpenMasterdataAPI_Result;
+  //minimalResult : TOpenMasterdataAPI_CoreResult;
 
   itm : TOpenMasterdataAPI_AuthResult;
 begin
@@ -288,7 +339,7 @@ begin
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientOAuth;
     RESTRequest.Params.AddItem('grant_type','refresh_token');
-    RESTRequest.Params.AddItem('client_id',OPENMASTERDATA_CLIENT_ID);
+    RESTRequest.Params.AddItem('client_id',FClientID);
     RESTRequest.Params.AddItem('refresh_token',FRefreshToken);
     RESTRequest.Response := RESTResponse;
 
@@ -302,25 +353,25 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    minimalResult := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
-      if not minimalResult.success then
-      begin
-        FLastErrorMessage := minimalResult.message_;
-        exit;
-      end;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      minimalResult.Free;
-    end;
+//    minimalResult := TOpenMasterdataAPI_CoreResult.Create;
+//    try
+//    try
+//      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
+//      if not minimalResult.success then
+//      begin
+//        FLastErrorMessage := minimalResult.message_;
+//        exit;
+//      end;
+//    except
+//      on E:Exception do
+//      begin
+//        FLastErrorMessage := E.ClassName+' '+e.Message;
+//        exit;
+//      end;
+//    end;
+//    finally
+//      minimalResult.Free;
+//    end;
 
     itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
@@ -354,11 +405,11 @@ end;
 
 function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
-  out _Result: TOpenMasterdataAPI_BySupplierPIDResult): Boolean;
+  out _Result: TOpenMasterdataAPI_Result): Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  minimalResult : TOpenMasterdataAPI_Result;
+  //minimalResult : TOpenMasterdataAPI_CoreResult;
 begin
   Result := false;
 
@@ -398,27 +449,7 @@ begin
 
     FLastBySupplierPIDResponseContent := RESTResponse.Content;
 
-    minimalResult := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
-      if not minimalResult.success then
-      begin
-        FLastErrorMessage := minimalResult.message_;
-        exit;
-      end;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      minimalResult.Free;
-    end;
-
-    _Result := TOpenMasterdataAPI_BySupplierPIDResult.Create;
+    _Result := TOpenMasterdataAPI_Result.Create;
     try
       GetDefaultSerializer.DeserializeObject(RESTResponse.Content, _Result);
       Result := true;

@@ -1,4 +1,24 @@
-﻿unit intf.OpenMasterdata.Types;
+﻿{
+License OpenMasterdata-for-Delphi
+
+Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Sven Harazim, info@landrix.de
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+}
+
+unit intf.OpenMasterdata.Types;
 
 interface
 
@@ -9,29 +29,29 @@ uses
   ;
 
 type
-  TOpenMasterdataAPI_Result = class
-  private
-    Fsuccess: Boolean;
-    Ferror: Boolean;
-    Fmessage : String;
-  public
-    property success : Boolean read Fsuccess write Fsuccess;
-    property error : Boolean read Ferror write Ferror;
-    [MVCNameAs('message')]
-    property message_ : String read Fmessage write Fmessage;
-  end;
+//  TOpenMasterdataAPI_CoreResult = class
+//  private
+//    Fsuccess: Boolean;
+//    Ferror: Boolean;
+//    Fmessage : String;
+//  public
+//    property success : Boolean read Fsuccess write Fsuccess;
+//    property error : Boolean read Ferror write Ferror;
+//    [MVCNameAs('message')]
+//    property message_ : String read Fmessage write Fmessage;
+//  end;
 
   TOpenMasterdataAPI_AuthResult = class
   private
-    Fsuccess: Boolean;
+    //Fsuccess: Boolean;
     Fexpires_in: Integer;
     Frefresh_token: String;
-    Ferror: Boolean;
+    //Ferror: Boolean;
     Ftoken_type: String;
     Faccess_token: String;
   public
-    property success : Boolean read Fsuccess write Fsuccess;
-    property error : Boolean read Ferror write Ferror;
+    //property success : Boolean read Fsuccess write Fsuccess;
+    //property error : Boolean read Ferror write Ferror;
     property access_token : String read Faccess_token write Faccess_token;
     property token_type : String read Ftoken_type write Ftoken_type;
     property expires_in : Integer read Fexpires_in write Fexpires_in;
@@ -258,10 +278,10 @@ type
   TOpenMasterdataAPI_PictureList = class(TObjectList<TOpenMasterdataAPI_Picture>)
   end;
 
-  TOpenMasterdataAPI_BySupplierPIDResult = class
+  TOpenMasterdataAPI_Result = class
   private
-    Fsuccess: Boolean;
-    Ferror: Boolean;
+    //Fsuccess: Boolean;
+    //Ferror: Boolean;
     Fprices: TOpenMasterdataAPI_Prices;
     Fdocuments: TOpenMasterdataAPI_DocumentList;
     Fdescriptions: TOpenMasterdataAPI_Descriptions;
@@ -274,8 +294,8 @@ type
     constructor Create; virtual;
     destructor Destroy; override;
 
-    property success : Boolean read Fsuccess write Fsuccess;
-    property error : Boolean read Ferror write Ferror;
+    //property success : Boolean read Fsuccess write Fsuccess;
+    //property error : Boolean read Ferror write Ferror;
     property supplierPid : String read FsupplierPid write FsupplierPid;
     property documents : TOpenMasterdataAPI_DocumentList read Fdocuments write Fdocuments;
     property additional : TOpenMasterdataAPI_Additional read Fadditional write Fadditional;
@@ -370,9 +390,9 @@ begin
   inherited;
 end;
 
-{ TOpenMasterdataAPI_BySupplierPIDResult }
+{ TOpenMasterdataAPI_Result }
 
-constructor TOpenMasterdataAPI_BySupplierPIDResult.Create;
+constructor TOpenMasterdataAPI_Result.Create;
 begin
   Fdocuments := TOpenMasterdataAPI_DocumentList.Create;
   Fadditional := TOpenMasterdataAPI_Additional.Create;
@@ -383,7 +403,7 @@ begin
   Fpictures := TOpenMasterdataAPI_PictureList.Create;
 end;
 
-destructor TOpenMasterdataAPI_BySupplierPIDResult.Destroy;
+destructor TOpenMasterdataAPI_Result.Destroy;
 begin
   if Assigned(Fdocuments) then begin Fdocuments.Free; Fdocuments := nil; end;
   if Assigned(Fadditional) then begin Fadditional.Free; Fadditional := nil; end;

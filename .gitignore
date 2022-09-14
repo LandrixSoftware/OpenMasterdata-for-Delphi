@@ -26,7 +26,6 @@
 #*.obj
 #
 
-intf.OpenMasterdata.inc
 Samples/Win32
 Samples/Win64
 Samples/configuration.ini

@@ -2,7 +2,12 @@
 
 # OpenMasterdata-for-Delphi
 
-Weitere Informationen unter https://www.itek.de/beratung/open-masterdata
+Aktuell umgesetzte Version ist 1.1.0
+
+Weitere Informationen unter 
+
+ - https://www.itek.de/beratung/open-masterdata
+ - https://itek-branchenwissen.atlassian.net/wiki/spaces/DS/pages/535593021/Open+Masterdata
 
 # Lizenz / License
 
