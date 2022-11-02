@@ -82,6 +82,7 @@ begin
   //Customernumber=
   //ClientID=
   //ClientSecret=
+  //ClientScope=
   //UsernameRequired=
   //CustomernumberRequired=
   //ClientSecretRequired=
@@ -132,6 +133,7 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'Customernumber',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientID',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecret',''));
+  Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'UsernameRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'CustomernumberRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecretRequired',''));
@@ -172,7 +174,8 @@ begin
                Configuration.ReadString(ComboBox1.Text,'Password',''),
                Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientSecret',''));
+               Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
+               Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
   end;
