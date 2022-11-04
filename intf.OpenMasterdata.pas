@@ -24,9 +24,8 @@ interface
 uses
   System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
+  ,System.NetEncoding
   ,Vcl.StdCtrls,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client,
-  MVCFramework.Serializer.Defaults,
-  MVCFramework.Serializer.Commons,
   intf.OpenMasterdata.Types
   ;
 
@@ -211,7 +210,6 @@ function TOpenMasterdataApiClient.Login: Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  //minimalResult : TOpenMasterdataAPI_CoreResult;
 
   itm : TOpenMasterdataAPI_AuthResult;
 begin
@@ -267,31 +265,11 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-//   minimalResult := TOpenMasterdataAPI_CoreResult.Create;
-//    try
-//    try
-//      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
-//      if not minimalResult.success then
-//      begin
-//        FLastErrorMessage := minimalResult.message_;
-//        exit;
-//      end;
-//    except
-//      on E:Exception do
-//      begin
-//        FLastErrorMessage := E.ClassName+' '+e.Message;
-//        exit;
-//      end;
-//    end;
-//    finally
-//      minimalResult.Free;
-//    end;
-
     itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
     try
     try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, itm);
+      itm.LoadFromJson(RESTResponse.Content);
 
       if itm.access_token.IsEmpty then
         exit;
@@ -321,7 +299,6 @@ function TOpenMasterdataApiClient.RefreshLogin: Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  //minimalResult : TOpenMasterdataAPI_CoreResult;
 
   itm : TOpenMasterdataAPI_AuthResult;
 begin
@@ -357,31 +334,11 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-//    minimalResult := TOpenMasterdataAPI_CoreResult.Create;
-//    try
-//    try
-//      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, minimalResult);
-//      if not minimalResult.success then
-//      begin
-//        FLastErrorMessage := minimalResult.message_;
-//        exit;
-//      end;
-//    except
-//      on E:Exception do
-//      begin
-//        FLastErrorMessage := E.ClassName+' '+e.Message;
-//        exit;
-//      end;
-//    end;
-//    finally
-//      minimalResult.Free;
-//    end;
-
     itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
     try
     try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, itm);
+      itm.LoadFromJson(RESTResponse.Content);
 
       if itm.access_token.IsEmpty or itm.refresh_token.IsEmpty then
         exit;
@@ -413,7 +370,6 @@ function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
-  //minimalResult : TOpenMasterdataAPI_CoreResult;
 begin
   Result := false;
 
@@ -438,11 +394,12 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientBySupplierPID;
-    RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,pkHTTPHEADER, [poDoNotEncode]);
-    RESTRequest.Params.AddItem('supplierPid',_SupplierPid);
-    RESTRequest.Params.AddItem('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages));
+    RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
+    RESTRequest.Method := rmGET;
+    //RESTRequest.URLAlreadyEncoded := true;
+    RESTRequest.AddParameter('supplierPid',TNetEncoding.URL.Encode(_SupplierPid),TRESTRequestParameterKind.pkGETorPOST,[TRESTRequestParameterOption.poDoNotEncode]);
+    RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkGETorPOST,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
-
     RESTRequest.Execute;
 
     if not RESTResponse.Status.SuccessOK_200 then
@@ -455,7 +412,7 @@ begin
 
     _Result := TOpenMasterdataAPI_Result.Create;
     try
-      GetDefaultSerializer.DeserializeObject(RESTResponse.Content, _Result);
+      _Result.LoadFromJson(RESTResponse.Content);
       Result := true;
     except
       on E:Exception do

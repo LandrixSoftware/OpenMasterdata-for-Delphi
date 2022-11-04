@@ -239,11 +239,11 @@ begin
   localFormatSettings := System.SysUtils.FormatSettings;
   localFormatSettings.DecimalSeparator := '.';
   localFormatSettings.ThousandSeparator := ',';
-  prices.listPrice.value := StrToCurr(_Val.prices.listPrice.value,localFormatSettings);
+  prices.listPrice.value := StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings);
   prices.listPrice.currency := _Val.prices.listPrice.currency;
   prices.listPrice.basis := _Val.prices.listPrice.basis;
   prices.listPrice.quantityUnit := _Val.prices.listPrice.quantityUnit;
-  prices.netPrice.value := StrToCurr(_Val.prices.netPrice.value,localFormatSettings);
+  prices.netPrice.value := StrToCurrDef(_Val.prices.netPrice.value,0,localFormatSettings);
   prices.netPrice.currency := _Val.prices.netPrice.currency;
   prices.netPrice.basis := _Val.prices.netPrice.basis;
   prices.netPrice.quantityUnit := _Val.prices.netPrice.quantityUnit;

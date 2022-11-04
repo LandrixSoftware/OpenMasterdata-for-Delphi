@@ -1,4 +1,4 @@
-﻿{
+{
 License OpenMasterdata-for-Delphi
 
 Copyright (C) 2022 Landrix Software GmbH & Co. KG
@@ -25,13 +25,10 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils,System.IniFiles,
   System.Variants, System.Classes, System.UITypes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, System.IOUtils,
   Vcl.StdCtrls, REST.Types, REST.Client, System.JSON, REST.Json,
-  MVCFramework.Serializer.Defaults,
-  MVCFramework.Serializer.Commons,
-  Winapi.WebView2, Winapi.ActiveX, Vcl.Edge,
-  intf.OpenMasterdata,intf.OpenMasterdata.Types,intf.OpenMasterdata.View,
-  Vcl.CheckLst
+  Winapi.WebView2, Winapi.ActiveX, Vcl.Edge,Vcl.CheckLst,
+  intf.OpenMasterdata,intf.OpenMasterdata.Types,intf.OpenMasterdata.View
   ;
 
 type
@@ -147,7 +144,7 @@ procedure TMainForm.btBySupplierPidClick(Sender: TObject);
 var
   client : IOpenMasterdataApiClient;
   supplierPid : TOpenMasterdataAPI_Result;
-  json,html : String;
+  html : String;
   dataPackages : TOpenMasterdataAPI_DataPackages;
 
   function FormatJSON(json: String): String;
@@ -187,8 +184,7 @@ begin
 
   if client.GetBySupplierPid(ListBox1.Items[ListBox1.ItemIndex],dataPackages,supplierPid) then
   try
-    json := GetDefaultSerializer.SerializeObject(supplierPid);
-    Memo1.Lines.Text := FormatJSON(json);
+    Memo1.Lines.Text := FormatJSON(client.GetLastBySupplierPIDResponseContent);
 
     html := TOpenMasterdataAPI_ViewHelper.AsHtml(supplierPid);
 
