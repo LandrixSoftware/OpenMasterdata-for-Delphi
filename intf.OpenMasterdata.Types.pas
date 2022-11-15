@@ -37,13 +37,16 @@ type
     Faccess_token: String;
     Fscope: String;
   public
-    procedure LoadFromJson(const _JsonValue : String);
-  public
     property access_token : String read Faccess_token write Faccess_token;
     property token_type : String read Ftoken_type write Ftoken_type;
     property expires_in : Integer read Fexpires_in write Fexpires_in;
     property refresh_token : String read Frefresh_token write Frefresh_token;
     property scope : String read Fscope write Fscope;
+  end;
+
+  TOpenMasterdataAPI_AuthResultHelper = class helper for TOpenMasterdataAPI_AuthResult
+  public
+    procedure LoadFromJson(const _JsonValue : String);
   end;
 
   TOpenMasterdataAPI_DataPackage = (omd_datapackage_basic,
@@ -291,6 +294,11 @@ type
     property quantityUnit : String read FquantityUnit write FquantityUnit;
   end;
 
+  TOpenMasterdataAPI_PriceHelper = class helper for TOpenMasterdataAPI_Price
+  public
+    function ValueAsCurrency : Currency;
+  end;
+
   TOpenMasterdataAPI_Basic = class
   private
     FproductShortDescr: String;
@@ -392,8 +400,14 @@ type
   TOpenMasterdataAPI_Descriptions = class
   private
     FproductDescr: String;
+    Fshorttext2: String;
+    Fshorttext1: String;
+    FmarketingText: String;
   public
+    property shorttext1 : String read Fshorttext1 write Fshorttext1;
     property productDescr : String read FproductDescr write FproductDescr;
+    property shorttext2 : String read Fshorttext2 write Fshorttext2;
+    property marketingText : String read FmarketingText write FmarketingText;
   end;
 
   TOpenMasterdataAPI_Picture = class
@@ -446,7 +460,6 @@ type
   public
     constructor Create; virtual;
     destructor Destroy; override;
-    procedure LoadFromJson(const _JsonValue : String);
   public
     property supplierPid : String read FsupplierPid write FsupplierPid; //Artikelnummer innerhalb des angefragten Lieferanten (Großhandelsnummer)
     property manufacturerId : String read FmanufacturerId write FmanufacturerId; //Herstellerartikelnummer
@@ -463,11 +476,16 @@ type
     property documents : TOpenMasterdataAPI_DocumentList read Fdocuments write Fdocuments;
   end;
 
+  TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
+  public
+    procedure LoadFromJson(const _JsonValue : String);
+  end;
+
 implementation
 
-{ TOpenMasterdataAPI_AuthResult }
+{ TOpenMasterdataAPI_AuthResultHelper }
 
-procedure TOpenMasterdataAPI_AuthResult.LoadFromJson(
+procedure TOpenMasterdataAPI_AuthResultHelper.LoadFromJson(
   const _JsonValue: String);
 var
   messageJson :      TJSONValue;
@@ -601,17 +619,18 @@ begin
   inherited;
 end;
 
-procedure TOpenMasterdataAPI_Result.LoadFromJson(const _JsonValue: String);
+{ TOpenMasterdataAPI_ResultHelper }
+
+procedure TOpenMasterdataAPI_ResultHelper.LoadFromJson(const _JsonValue: String);
 var
   messageJson:      TJSONValue;
 
   jsonString  : TJSONString;
   jsonNumber : TJSONNumber;
+  jsonArray : TJSONArray;
+  jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
-  jsonValueFound : Boolean;
-
-//   messageObject:      TErrorMessage;
-//   messagesObjects:   TArray<TErrorMessage>;
+  //jsonValueFound : Boolean;
 begin
   messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
 
@@ -628,11 +647,11 @@ begin
 
   if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
   begin
-    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then //entspricht Spezifikation
-      jsonValueFound := true else
-    if jsonValue.TryGetValue<TJSONValue>('listprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-      jsonValueFound := true else jsonValueFound := false;
-    if jsonValueFound then
+//    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then //entspricht Spezifikation
+//      jsonValueFound := true else
+//    if jsonValue.TryGetValue<TJSONValue>('listprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
+//      jsonValueFound := true else jsonValueFound := false;
+    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
     begin
       if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
         prices.listPrice.value := jsonString.Value;
@@ -654,11 +673,11 @@ begin
       if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
         prices.rrp.quantityUnit := jsonString.Value;
     end;
-    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then //entspricht Spezifikation
-      jsonValueFound := true else
-    if jsonValue.TryGetValue<TJSONValue>('netprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-      jsonValueFound := true else jsonValueFound := false;
-    if jsonValueFound then
+//    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then //entspricht Spezifikation
+//      jsonValueFound := true else
+//    if jsonValue.TryGetValue<TJSONValue>('netprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
+//      jsonValueFound := true else jsonValueFound := false;
+    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
     begin
       if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
         prices.netprice.value := jsonString.Value;
@@ -676,44 +695,53 @@ begin
       prices.billBasis := jsonString.Value;
     //TODO rawMaterial
   end;
-
-
-//    manufacturerPid := jsonString.Value;
-//
-//  if messageJson.TryGetValue<TJSONNumber>('expires_in',jsonNumber) then
-//    expires_in := jsonNumber.AsInt;
-//  if messageJson.TryGetValue<TJSONString>('refresh_token',jsonString) then
-//    refresh_token := jsonString.Value;
-//  if messageJson.TryGetValue<TJSONString>('scope',jsonString) then
-//    scope := jsonString.Value;
-
-
-//    "basic": {
-//        "productType": "PAK",
-//        "startOfValidity": "2022-11-03",
-//        "productShortDescr": "AS-Anschluss-Spannschelle DN  56, an SML- und Stahl-Rohre",
-//        "priceOnDemand": false,
-//        "rrp": {
-//            "value": "3.93",
-//            "currency": "EUR",
-//            "basis": 1,
-//            "quantityUnit": "PCE"
-//        },
-//        "mainCommodityGroupId": "I",
-//        "mainCommodityGroupDescr": "Installation",
-//        "commodityGroupId": "I999",
-//        "commodityGroupDescr": "INS Installation Diverse",
-//        "noteOfUse": "",
-//        "matchcode": "",
-//        "serie": "",
-//        "modelNumber": ""
-//    },
-//    "additional": {
+  if messageJson.TryGetValue<TJSONValue>('basic',jsonValue) then
+  begin
+    if jsonValue.TryGetValue<TJSONString>('productType',jsonString) then
+      basic.productType := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('startOfValidity',jsonString) then
+      basic.startOfValidity := ISO8601ToDate(jsonString.Value);
+    if jsonValue.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+      basic.productShortDescr := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONBool>('priceOnDemand',jsonBool) then
+      basic.priceOnDemand := jsonBool.AsBoolean;
+    if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
+    begin
+      if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
+        basic.rrp.value := jsonString.Value;
+      if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
+        basic.rrp.currency := jsonString.Value;
+      if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
+        basic.rrp.basis := StrToIntDef(jsonValue3.Value,1);
+      if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
+        basic.rrp.quantityUnit := jsonString.Value;
+    end;
+    if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupId',jsonString) then
+      basic.mainCommodityGroupId := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupDescr',jsonString) then
+      basic.mainCommodityGroupDescr := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('commodityGroupId',jsonString) then
+      basic.commodityGroupId := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('commodityGroupDescr',jsonString) then
+      basic.commodityGroupDescr := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('noteOfUse',jsonString) then
+      basic.noteOfUse := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('matchcode',jsonString) then
+      basic.matchcode := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('serie',jsonString) then
+      basic.serie := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('modelNumber',jsonString) then
+      basic.modelNumber := jsonString.Value;
+  end;
+  if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
+  begin
 //        "minOrderQuantity": "1.000",
 //        "minOrderUnit": "PCE",
 //        "articleNumberCatalogue": "",
 //        "alternativeProduct": [],
 //        "followupProduct": [],
+    if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
+      additional.deepLink := jsonString.Value;
 //        "deepLink": "https://www.mosecker-online.de/online3/artikelauskunft.csp?Artikel=09%2B10044",
 //        "expiringProduct": "No",
 //        "commodityGroupIdManufacturer": "",
@@ -728,13 +756,18 @@ begin
 //        "sets": [],
 //        "attribute": [],
 //        "constructionText": ""
-//    },
-//    "descriptions": {
-//        "shorttext1": "AS-Anschluss-Spannschelle DN  56, an",
-//        "shorttext2": "SML- und Stahl-Rohre",
-//        "productDescr": "",
-//        "marketingText": ""
-//    },
+  end;
+  if messageJson.TryGetValue<TJSONValue>('descriptions',jsonValue) then
+  begin
+    if jsonValue.TryGetValue<TJSONString>('shorttext1',jsonString) then
+      descriptions.shorttext1 := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('shorttext2',jsonString) then
+      descriptions.shorttext2 := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('productDescr',jsonString) then
+      descriptions.productDescr := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('marketingText',jsonString) then
+      descriptions.marketingText := jsonString.Value;
+  end;
 //    "logistics": {
 //        "exportable": true,
 //        "countryOfOrigin": "DE",
@@ -752,32 +785,54 @@ begin
 //        "weeeNumber": "",
 //        "packagingQuantity": 1
 //    },
-//    "pictures": [
-//        {
-//            "url": "https://www.mosecker-online.de/bilddaten/arge/mmedia/wv/web_bilder/wvb_0003127.jpg",
-//            "urlThumbnail": "https://www.mosecker-online.de/thumbnails/bilddaten/arge/mmedia/wv/web_bilder/wvb_0003127-tn-120-120.jpg",
-//            "type": "B_",
-//            "use": "Web",
-//            "substituteId": true,
-//            "description": "Farbbild",
-//            "sortOrder": 1,
-//            "size": 233190,
-//            "filename": "wvb_0003127.jpg"
-//        }
-//    ],
-//    "documents": []
-//}
+  if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
+  for jsonValue in jsonArray do
+  begin
+    var itemPicture : TOpenMasterdataAPI_Picture := TOpenMasterdataAPI_Picture.Create;
+    pictures.Add(itemPicture);
 
-//  messagesJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONArray;
+    if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
+      itemPicture.url := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('urlThumbnail',jsonString) then
+      itemPicture.urlThumbnail := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
+      itemPicture.type_ := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('use',jsonString) then
+      itemPicture.use := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONBool>('substituteId',jsonBool) then
+      itemPicture.substituteId := jsonBool.AsBoolean;
+    if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
+      itemPicture.description := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
+      itemPicture.sortOrder := jsonNumber.AsInt;
+    if jsonValue.TryGetValue<TJSONNumber>('size',jsonNumber) then
+      itemPicture.size := jsonNumber.AsInt;
+    if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
+      itemPicture.filename := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
+      itemPicture.hash := jsonString.Value;
+  end;
+  if messageJson.TryGetValue<TJSONArray>('documents',jsonArray) then
+  for jsonValue in jsonArray do
+  begin
+    var itemDocument : TOpenMasterdataAPI_Document := TOpenMasterdataAPI_Document.Create;
+    documents.Add(itemDocument);
 
- //  messagesObjects := [];
-//  for messageJson in messagesJson do
-//  begin
-
-      //messageObject := TJson.JsonToObject<TErrorMessage>(messageJson as TJsonObject);
-      //messagesObjects := messagesObjects + [messageObject];
-//  end;
-
+    if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
+      itemDocument.url := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
+      itemDocument.type_ := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
+      itemDocument.description := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
+      itemDocument.sortOrder := jsonNumber.AsInt;
+    if jsonValue.TryGetValue<TJSONValue>('size',jsonValue3) then
+      itemDocument.size := StrToIntDef(jsonValue3.Value,0);
+    if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
+      itemDocument.filename := jsonString.Value;
+    if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
+      itemDocument.hash := jsonString.Value;
+  end;
 end;
 
 { TOpenMasterdataAPI_Basic }
@@ -791,6 +846,17 @@ destructor TOpenMasterdataAPI_Basic.Destroy;
 begin
   if Assigned(Frrp) then begin Frrp.Free; Frrp := nil; end;
   inherited;
+end;
+
+{ TOpenMasterdataAPI_PriceHelper }
+
+function TOpenMasterdataAPI_PriceHelper.ValueAsCurrency: Currency;
+var
+  fs : TFormatSettings;
+begin
+  fs.ThousandSeparator := ',';
+  fs.DecimalSeparator := '.';
+  Result := StrToCurrDef(value,0,fs);
 end;
 
 end.

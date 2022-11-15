@@ -112,6 +112,9 @@ begin
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_documents));
   for var i : Integer := 0 to CheckListBox1.Items.Count-1 do
     CheckListBox1.Checked[i] := true;
+
+  EdgeBrowser1.Navigate('about:blank');
+
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
@@ -189,8 +192,6 @@ begin
     html := TOpenMasterdataAPI_ViewHelper.AsHtml(supplierPid);
 
     EdgeBrowser1.NavigateToString(html);
-
-    EdgeBrowser1.Navigate('www.google.de');
   finally
     supplierPid.Free;
   end else

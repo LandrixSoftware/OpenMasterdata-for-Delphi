@@ -35,13 +35,13 @@ type
 
 implementation
 
-
 { TOpenMasterdataAPI_ViewHelper }
 
 class function TOpenMasterdataAPI_ViewHelper.AsHtml(
   _Val: TOpenMasterdataAPI_Result): String;
 var
   html : TStringList;
+  i : Integer;
 begin
   Result := '';
   html := TStringList.Create;
@@ -49,11 +49,42 @@ begin
     html.Add('<html>');
     html.Add('<body>');
     html.Add('<h1>Artikel-Nr.: '+_Val.supplierPid+'</h1>');
-    html.Add('<h2>'+_Val.descriptions.productDescr+'</h2>');
-    html.Add('');
-    html.Add('');
-    html.Add('');
-    html.Add('');
+    html.Add('<h2>'+_Val.basic.productShortDescr+'</h2>');
+    if _Val.descriptions.productDescr <> '' then
+      html.Add('<p>'+_Val.descriptions.productDescr+'</p>');
+
+    if (_Val.additional.deepLink <> '') then
+      html.Add('<a href="'+_Val.additional.deepLink+'" target="_blank">Weitere Details online</a><br/>');
+    if _Val.basic.startOfValidity > 0 then
+      html.Add('G&uuml;ltig ab: '+DateToStr(_Val.basic.startOfValidity)+'<br/>');
+    if (_Val.basic.mainCommodityGroupId <> '') then
+      html.Add('Hauptwarengruppe: '+_Val.basic.mainCommodityGroupId+' '+_Val.basic.mainCommodityGroupDescr+'<br/>');
+    if (_Val.basic.commodityGroupId <> '') then
+      html.Add('Warengruppe: '+_Val.basic.commodityGroupId+' '+_Val.basic.commodityGroupDescr+'<br/>');
+    html.Add('<br/>');
+    if (_Val.basic.priceOnDemand) then
+      html.Add('Preis nur auf Anfrage.<br/>');
+    if (_Val.prices.listPrice.ValueAsCurrency > 0) then
+      html.Add('Listenpreis: '+Format('%n %s',[_Val.prices.listPrice.ValueAsCurrency,_Val.prices.listPrice.currency])+'<br/>');
+    if (_Val.prices.netPrice.ValueAsCurrency > 0) then
+      html.Add('Einkaufspreis: '+Format('%n %s',[_Val.prices.netPrice.ValueAsCurrency,_Val.prices.netPrice.currency])+'<br/>');
+
+    html.Add('<br/>');
+    if _Val.pictures.Count > 0 then
+      html.Add('<h3>Bilder</h3>');
+    for i := 0 to _Val.pictures.Count-1 do
+    begin
+      html.Add('<img src="'+IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail)+'"></img><br/>');
+    end;
+
+    html.Add('<br/>');
+    if _Val.documents.Count > 0 then
+      html.Add('<h3>Dokumente</h3>');
+    for i := 0 to _Val.documents.Count-1 do
+    begin
+      html.Add('<a href="'+_Val.documents[i].url+'" target="_blank">'+_Val.documents[i].url+'</a><br/>');
+    end;
+
     html.Add('');
     html.Add('');
     html.Add('');
