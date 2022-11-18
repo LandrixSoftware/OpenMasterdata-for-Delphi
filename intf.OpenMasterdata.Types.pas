@@ -493,17 +493,20 @@ var
   jsonValue : TJSONValue;
 begin
   messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
-
-  if messageJson.TryGetValue<TJSONString>('access_token',jsonString) then
-    access_token := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('token_type',jsonString) then
-    token_type := jsonString.Value;
-  if messageJson.TryGetValue<TJSONValue>('expires_in',jsonValue) then
-    expires_in := StrToIntDef(jsonValue.Value,0);
-  if messageJson.TryGetValue<TJSONString>('refresh_token',jsonString) then
-    refresh_token := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('scope',jsonString) then
-    scope := jsonString.Value;
+  try
+    if messageJson.TryGetValue<TJSONString>('access_token',jsonString) then
+      access_token := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('token_type',jsonString) then
+      token_type := jsonString.Value;
+    if messageJson.TryGetValue<TJSONValue>('expires_in',jsonValue) then
+      expires_in := StrToIntDef(jsonValue.Value,0);
+    if messageJson.TryGetValue<TJSONString>('refresh_token',jsonString) then
+      refresh_token := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('scope',jsonString) then
+      scope := jsonString.Value;
+  finally
+    messageJson.Free;
+  end;
 end;
 
 { TOpenMasterdataAPI_DataPackageHelper }
@@ -633,205 +636,208 @@ var
   //jsonValueFound : Boolean;
 begin
   messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
+  try
+    if messageJson.TryGetValue<TJSONString>('supplierPid',jsonString) then
+      supplierPid := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('manufacturerId',jsonString) then
+      manufacturerId := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
+      manufacturerIdType := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
+      manufacturerPid := jsonString.Value;
+    if messageJson.TryGetValue<TJSONString>('gtin',jsonString) then
+      gtin := jsonString.Value;
 
-  if messageJson.TryGetValue<TJSONString>('supplierPid',jsonString) then
-    supplierPid := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('manufacturerId',jsonString) then
-    manufacturerId := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
-    manufacturerIdType := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
-    manufacturerPid := jsonString.Value;
-  if messageJson.TryGetValue<TJSONString>('gtin',jsonString) then
-    gtin := jsonString.Value;
-
-  if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
-  begin
-//    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then //entspricht Spezifikation
-//      jsonValueFound := true else
-//    if jsonValue.TryGetValue<TJSONValue>('listprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-//      jsonValueFound := true else jsonValueFound := false;
-    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
+    if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
     begin
-      if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-        prices.listPrice.value := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-        prices.listPrice.currency := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-        prices.listPrice.basis := StrToIntDef(jsonValue3.Value,1);
-      if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-        prices.listPrice.quantityUnit := jsonString.Value;
-    end;
-    if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-    begin
-      if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-        prices.rrp.value := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-        prices.rrp.currency := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-        prices.rrp.basis := StrToIntDef(jsonValue3.Value,1);
-      if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-        prices.rrp.quantityUnit := jsonString.Value;
-    end;
-//    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then //entspricht Spezifikation
-//      jsonValueFound := true else
-//    if jsonValue.TryGetValue<TJSONValue>('netprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-//      jsonValueFound := true else jsonValueFound := false;
-    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
-    begin
-      if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-        prices.netprice.value := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-        prices.netprice.currency := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-        prices.netPrice.basis := StrToIntDef(jsonValue3.Value,1);
-      if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-        prices.netprice.quantityUnit := jsonString.Value;
-    end;
+  //    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then //entspricht Spezifikation
+  //      jsonValueFound := true else
+  //    if jsonValue.TryGetValue<TJSONValue>('listprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
+  //      jsonValueFound := true else jsonValueFound := false;
+      if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
+      begin
+        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
+          prices.listPrice.value := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
+          prices.listPrice.currency := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
+          prices.listPrice.basis := StrToIntDef(jsonValue3.Value,1);
+        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
+          prices.listPrice.quantityUnit := jsonString.Value;
+      end;
+      if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
+      begin
+        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
+          prices.rrp.value := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
+          prices.rrp.currency := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
+          prices.rrp.basis := StrToIntDef(jsonValue3.Value,1);
+        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
+          prices.rrp.quantityUnit := jsonString.Value;
+      end;
+  //    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then //entspricht Spezifikation
+  //      jsonValueFound := true else
+  //    if jsonValue.TryGetValue<TJSONValue>('netprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
+  //      jsonValueFound := true else jsonValueFound := false;
+      if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
+      begin
+        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
+          prices.netprice.value := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
+          prices.netprice.currency := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
+          prices.netPrice.basis := StrToIntDef(jsonValue3.Value,1);
+        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
+          prices.netprice.quantityUnit := jsonString.Value;
+      end;
 
-    if jsonValue.TryGetValue<TJSONNumber>('taxCode',jsonNumber) then
-      prices.taxCode := jsonNumber.AsInt;
-    if jsonValue.TryGetValue<TJSONString>('billBasis',jsonString) then
-      prices.billBasis := jsonString.Value;
-    //TODO rawMaterial
-  end;
-  if messageJson.TryGetValue<TJSONValue>('basic',jsonValue) then
-  begin
-    if jsonValue.TryGetValue<TJSONString>('productType',jsonString) then
-      basic.productType := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('startOfValidity',jsonString) then
-      basic.startOfValidity := ISO8601ToDate(jsonString.Value);
-    if jsonValue.TryGetValue<TJSONString>('productShortDescr',jsonString) then
-      basic.productShortDescr := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONBool>('priceOnDemand',jsonBool) then
-      basic.priceOnDemand := jsonBool.AsBoolean;
-    if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-    begin
-      if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-        basic.rrp.value := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-        basic.rrp.currency := jsonString.Value;
-      if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-        basic.rrp.basis := StrToIntDef(jsonValue3.Value,1);
-      if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-        basic.rrp.quantityUnit := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONNumber>('taxCode',jsonNumber) then
+        prices.taxCode := jsonNumber.AsInt;
+      if jsonValue.TryGetValue<TJSONString>('billBasis',jsonString) then
+        prices.billBasis := jsonString.Value;
+      //TODO rawMaterial
     end;
-    if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupId',jsonString) then
-      basic.mainCommodityGroupId := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupDescr',jsonString) then
-      basic.mainCommodityGroupDescr := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('commodityGroupId',jsonString) then
-      basic.commodityGroupId := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('commodityGroupDescr',jsonString) then
-      basic.commodityGroupDescr := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('noteOfUse',jsonString) then
-      basic.noteOfUse := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('matchcode',jsonString) then
-      basic.matchcode := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('serie',jsonString) then
-      basic.serie := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('modelNumber',jsonString) then
-      basic.modelNumber := jsonString.Value;
-  end;
-  if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
-  begin
-//        "minOrderQuantity": "1.000",
-//        "minOrderUnit": "PCE",
-//        "articleNumberCatalogue": "",
-//        "alternativeProduct": [],
-//        "followupProduct": [],
-    if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
-      additional.deepLink := jsonString.Value;
-//        "deepLink": "https://www.mosecker-online.de/online3/artikelauskunft.csp?Artikel=09%2B10044",
-//        "expiringProduct": "No",
-//        "commodityGroupIdManufacturer": "",
-//        "commodityGroupDescrManufacturer": "",
-//        "productGroupIdManufacturer": "",
-//        "productGroupDescrManufacturer": "",
-//        "discoundGroupIdManufacturer": "",
-//        "discountGroupDescrManufacturer": "",
-//        "bonusGroupIdManufacturer": "",
-//        "bonusGroupDescrManufacturer": "",
-//        "accessories": [],
-//        "sets": [],
-//        "attribute": [],
-//        "constructionText": ""
-  end;
-  if messageJson.TryGetValue<TJSONValue>('descriptions',jsonValue) then
-  begin
-    if jsonValue.TryGetValue<TJSONString>('shorttext1',jsonString) then
-      descriptions.shorttext1 := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('shorttext2',jsonString) then
-      descriptions.shorttext2 := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('productDescr',jsonString) then
-      descriptions.productDescr := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('marketingText',jsonString) then
-      descriptions.marketingText := jsonString.Value;
-  end;
-//    "logistics": {
-//        "exportable": true,
-//        "countryOfOrigin": "DE",
-//        "hazardousMaterial": false,
-//        "unNumber": "",
-//        "dangerClass": "",
-//        "reachInfo": "no data",
-//        "reachData": "",
-//        "ubaListRelevant": false,
-//        "ubaListConform": false,
-//        "durabilityPeriod": 99,
-//        "standardDeliveryPeriod": 14,
-//        "lucidNumber": "",
-//        "packagingDisposalProvider": "",
-//        "weeeNumber": "",
-//        "packagingQuantity": 1
-//    },
-  if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
-  for jsonValue in jsonArray do
-  begin
-    var itemPicture : TOpenMasterdataAPI_Picture := TOpenMasterdataAPI_Picture.Create;
-    pictures.Add(itemPicture);
+    if messageJson.TryGetValue<TJSONValue>('basic',jsonValue) then
+    begin
+      if jsonValue.TryGetValue<TJSONString>('productType',jsonString) then
+        basic.productType := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('startOfValidity',jsonString) then
+        basic.startOfValidity := ISO8601ToDate(jsonString.Value);
+      if jsonValue.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+        basic.productShortDescr := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONBool>('priceOnDemand',jsonBool) then
+        basic.priceOnDemand := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
+      begin
+        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
+          basic.rrp.value := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
+          basic.rrp.currency := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
+          basic.rrp.basis := StrToIntDef(jsonValue3.Value,1);
+        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
+          basic.rrp.quantityUnit := jsonString.Value;
+      end;
+      if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupId',jsonString) then
+        basic.mainCommodityGroupId := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupDescr',jsonString) then
+        basic.mainCommodityGroupDescr := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('commodityGroupId',jsonString) then
+        basic.commodityGroupId := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('commodityGroupDescr',jsonString) then
+        basic.commodityGroupDescr := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('noteOfUse',jsonString) then
+        basic.noteOfUse := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('matchcode',jsonString) then
+        basic.matchcode := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('serie',jsonString) then
+        basic.serie := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('modelNumber',jsonString) then
+        basic.modelNumber := jsonString.Value;
+    end;
+    if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
+    begin
+  //        "minOrderQuantity": "1.000",
+  //        "minOrderUnit": "PCE",
+  //        "articleNumberCatalogue": "",
+  //        "alternativeProduct": [],
+  //        "followupProduct": [],
+      if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
+        additional.deepLink := jsonString.Value;
+  //        "deepLink": "https://www.mosecker-online.de/online3/artikelauskunft.csp?Artikel=09%2B10044",
+  //        "expiringProduct": "No",
+  //        "commodityGroupIdManufacturer": "",
+  //        "commodityGroupDescrManufacturer": "",
+  //        "productGroupIdManufacturer": "",
+  //        "productGroupDescrManufacturer": "",
+  //        "discoundGroupIdManufacturer": "",
+  //        "discountGroupDescrManufacturer": "",
+  //        "bonusGroupIdManufacturer": "",
+  //        "bonusGroupDescrManufacturer": "",
+  //        "accessories": [],
+  //        "sets": [],
+  //        "attribute": [],
+  //        "constructionText": ""
+    end;
+    if messageJson.TryGetValue<TJSONValue>('descriptions',jsonValue) then
+    begin
+      if jsonValue.TryGetValue<TJSONString>('shorttext1',jsonString) then
+        descriptions.shorttext1 := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('shorttext2',jsonString) then
+        descriptions.shorttext2 := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('productDescr',jsonString) then
+        descriptions.productDescr := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('marketingText',jsonString) then
+        descriptions.marketingText := jsonString.Value;
+    end;
+  //    "logistics": {
+  //        "exportable": true,
+  //        "countryOfOrigin": "DE",
+  //        "hazardousMaterial": false,
+  //        "unNumber": "",
+  //        "dangerClass": "",
+  //        "reachInfo": "no data",
+  //        "reachData": "",
+  //        "ubaListRelevant": false,
+  //        "ubaListConform": false,
+  //        "durabilityPeriod": 99,
+  //        "standardDeliveryPeriod": 14,
+  //        "lucidNumber": "",
+  //        "packagingDisposalProvider": "",
+  //        "weeeNumber": "",
+  //        "packagingQuantity": 1
+  //    },
+    if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
+    for jsonValue in jsonArray do
+    begin
+      var itemPicture : TOpenMasterdataAPI_Picture := TOpenMasterdataAPI_Picture.Create;
+      pictures.Add(itemPicture);
 
-    if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-      itemPicture.url := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('urlThumbnail',jsonString) then
-      itemPicture.urlThumbnail := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-      itemPicture.type_ := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('use',jsonString) then
-      itemPicture.use := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONBool>('substituteId',jsonBool) then
-      itemPicture.substituteId := jsonBool.AsBoolean;
-    if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-      itemPicture.description := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-      itemPicture.sortOrder := jsonNumber.AsInt;
-    if jsonValue.TryGetValue<TJSONNumber>('size',jsonNumber) then
-      itemPicture.size := jsonNumber.AsInt;
-    if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-      itemPicture.filename := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-      itemPicture.hash := jsonString.Value;
-  end;
-  if messageJson.TryGetValue<TJSONArray>('documents',jsonArray) then
-  for jsonValue in jsonArray do
-  begin
-    var itemDocument : TOpenMasterdataAPI_Document := TOpenMasterdataAPI_Document.Create;
-    documents.Add(itemDocument);
+      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
+        itemPicture.url := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('urlThumbnail',jsonString) then
+        itemPicture.urlThumbnail := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
+        itemPicture.type_ := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('use',jsonString) then
+        itemPicture.use := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONBool>('substituteId',jsonBool) then
+        itemPicture.substituteId := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
+        itemPicture.description := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
+        itemPicture.sortOrder := jsonNumber.AsInt;
+      if jsonValue.TryGetValue<TJSONNumber>('size',jsonNumber) then
+        itemPicture.size := jsonNumber.AsInt;
+      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
+        itemPicture.filename := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
+        itemPicture.hash := jsonString.Value;
+    end;
+    if messageJson.TryGetValue<TJSONArray>('documents',jsonArray) then
+    for jsonValue in jsonArray do
+    begin
+      var itemDocument : TOpenMasterdataAPI_Document := TOpenMasterdataAPI_Document.Create;
+      documents.Add(itemDocument);
 
-    if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-      itemDocument.url := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-      itemDocument.type_ := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-      itemDocument.description := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-      itemDocument.sortOrder := jsonNumber.AsInt;
-    if jsonValue.TryGetValue<TJSONValue>('size',jsonValue3) then
-      itemDocument.size := StrToIntDef(jsonValue3.Value,0);
-    if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-      itemDocument.filename := jsonString.Value;
-    if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-      itemDocument.hash := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
+        itemDocument.url := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
+        itemDocument.type_ := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
+        itemDocument.description := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
+        itemDocument.sortOrder := jsonNumber.AsInt;
+      if jsonValue.TryGetValue<TJSONValue>('size',jsonValue3) then
+        itemDocument.size := StrToIntDef(jsonValue3.Value,0);
+      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
+        itemDocument.filename := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
+        itemDocument.hash := jsonString.Value;
+    end;
+  finally
+    messageJson.Free;
   end;
 end;
 

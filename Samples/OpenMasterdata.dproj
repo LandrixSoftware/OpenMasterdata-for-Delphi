@@ -70,7 +70,7 @@
         <UWP_DelphiLogo44>$(BDS)\bin\Artwork\Windows\UWP\delphi_UwpDefault_44.png</UWP_DelphiLogo44>
         <UWP_DelphiLogo150>$(BDS)\bin\Artwork\Windows\UWP\delphi_UwpDefault_150.png</UWP_DelphiLogo150>
         <SanitizedProjectName>OpenMasterdata</SanitizedProjectName>
-        <DCC_UnitSearchPath>..\;D:\projekte\src-landrix-delphi-win64\lib\mvcf;D:\projekte\src-landrix-delphi-win64\lib\loggerpro;D:\projekte\src-landrix-delphi-win64\lib\swagdoc;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <VerInfo_Locale>1031</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
     </PropertyGroup>
@@ -109,7 +109,6 @@ $(PostBuildEvent)]]></PostBuildEvent>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
-        <AppEnableRuntimeThemes>true</AppEnableRuntimeThemes>
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
@@ -138,7 +137,6 @@ $(PostBuildEvent)]]></PostBuildEvent>
         </DelphiCompile>
         <DCCReference Include="OpenMasterdataUnit1.pas">
             <Form>MainForm</Form>
-            <FormType>dfm</FormType>
         </DCCReference>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
