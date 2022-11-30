@@ -238,10 +238,10 @@ begin
       begin
         RESTRequest.Params.AddItem('grant_type','client_credentials');
         RESTRequest.Params.AddItem('client_secret',FClientSecret);
-        if not FClientScope.IsEmpty then
-          RESTRequest.Params.AddItem('scope',FClientScope);
       end;
     end;
+    if not FClientScope.IsEmpty then
+      RESTRequest.Params.AddItem('scope',FClientScope);
     RESTRequest.Params.AddItem('client_id',FClientID);
 
     if (FUsername <> '') and (FCustomerNumber <> '') then

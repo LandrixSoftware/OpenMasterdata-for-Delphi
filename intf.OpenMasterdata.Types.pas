@@ -636,6 +636,10 @@ var
   //jsonValueFound : Boolean;
 begin
   messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
+
+  if messageJson = nil then
+    exit;
+
   try
     if messageJson.TryGetValue<TJSONString>('supplierPid',jsonString) then
       supplierPid := jsonString.Value;

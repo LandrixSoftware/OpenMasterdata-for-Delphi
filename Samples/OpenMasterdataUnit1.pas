@@ -155,8 +155,12 @@ var
     tmpJson: System.JSON.TJSONValue;
   begin
     tmpJson := System.JSON.TJSONObject.ParseJSONValue(json);
-    Result := Rest.Json.TJson.Format(tmpJson);
-    FreeAndNil(tmpJson);
+    if tmpJson <> nil then
+    begin
+      Result := Rest.Json.TJson.Format(tmpJson);
+      FreeAndNil(tmpJson);
+    end else
+      Result := json;
   end;
 
 begin
