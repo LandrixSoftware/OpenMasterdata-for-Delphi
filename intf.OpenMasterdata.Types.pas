@@ -29,6 +29,11 @@ uses
   ;
 
 type
+  TOpenMasterdataAPIHelper = class(TObject)
+  public
+    class function JSONStrToDate(_Val : String) : TDate;
+  end;
+
   TOpenMasterdataAPI_AuthResult = class
   private
     Fexpires_in: Integer;
@@ -537,7 +542,7 @@ begin
   if i in _Val then
   begin
     if Result <> '' then
-      Result := Result + '|';
+      Result := Result + '%7C';
     Result := Result + TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(i);
   end;
 end;
@@ -707,7 +712,7 @@ begin
       if jsonValue.TryGetValue<TJSONString>('productType',jsonString) then
         basic.productType := jsonString.Value;
       if jsonValue.TryGetValue<TJSONString>('startOfValidity',jsonString) then
-        basic.startOfValidity := ISO8601ToDate(jsonString.Value);
+        basic.startOfValidity := TOpenMasterdataAPIHelper.JSONStrToDate(jsonString.Value);
       if jsonValue.TryGetValue<TJSONString>('productShortDescr',jsonString) then
         basic.productShortDescr := jsonString.Value;
       if jsonValue.TryGetValue<TJSONBool>('priceOnDemand',jsonBool) then
@@ -867,6 +872,23 @@ begin
   fs.ThousandSeparator := ',';
   fs.DecimalSeparator := '.';
   Result := StrToCurrDef(value,0,fs);
+end;
+
+{ TOpenMasterdataAPIHelper }
+
+class function TOpenMasterdataAPIHelper.JSONStrToDate(
+  _Val: String): TDate;
+begin
+  Result := 0;
+  _Val := Trim(_Val);
+  if _Val = '' then
+    exit;
+  if (Length(_Val) = 8) and (Pos('-',_Val)=0) then
+  begin
+    exit;
+//    Insert('-',_Val,);
+  end;
+  Result := ISO8601ToDate(_Val);
 end;
 
 end.

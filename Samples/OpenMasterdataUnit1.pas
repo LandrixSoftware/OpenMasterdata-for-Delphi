@@ -1,4 +1,4 @@
-{
+﻿{
 License OpenMasterdata-for-Delphi
 
 Copyright (C) 2022 Landrix Software GmbH & Co. KG
@@ -61,14 +61,14 @@ implementation
 
 procedure TMainForm.FormCreate(Sender: TObject);
 var
-  configurationFilename : String;
+  basePath,configurationFilename : String;
 begin
   if (Pos('Samples\Win32',Application.ExeName)>0) or (Pos('Samples\Win64',Application.ExeName)>0) then
-    configurationFilename := ExtractFilePath(ExtractFileDir(ExtractFileDir(Application.ExeName)))
+    basePath := ExtractFilePath(ExtractFileDir(ExtractFileDir(Application.ExeName)))
   else
-    configurationFilename := ExtractFilePath(Application.ExeName);
+    basePath := ExtractFilePath(Application.ExeName);
 
-  configurationFilename := configurationFilename + 'configuration.ini';
+  configurationFilename := basePath + 'configuration.ini';
 
   Configuration := TMemIniFile.Create(configurationFilename);
 
@@ -80,6 +80,7 @@ begin
   //ClientID=
   //ClientSecret=
   //ClientScope=
+  //GrantType=
   //UsernameRequired=
   //CustomernumberRequired=
   //ClientSecretRequired=
@@ -115,6 +116,78 @@ begin
 
   EdgeBrowser1.Navigate('about:blank');
 
+  var _Result : TOpenMasterdataAPI_Result;
+
+  _Result := TOpenMasterdataAPI_Result.Create;
+    try
+    try
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Wiedemann.json'));
+    except
+      on E:Exception do
+      begin
+        //FLastErrorMessage := E.ClassName+' '+e.Message;
+        exit;
+      end;
+    end;
+    finally
+      _Result.Free;
+    end;
+  _Result := TOpenMasterdataAPI_Result.Create;
+    try
+    try
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Mosecker.json'));
+    except
+      on E:Exception do
+      begin
+        //FLastErrorMessage := E.ClassName+' '+e.Message;
+        exit;
+      end;
+    end;
+    finally
+      _Result.Free;
+    end;
+  _Result := TOpenMasterdataAPI_Result.Create;
+    try
+    try
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Mainmetall.json'));
+    except
+      on E:Exception do
+      begin
+        //FLastErrorMessage := E.ClassName+' '+e.Message;
+        exit;
+      end;
+    end;
+    finally
+      _Result.Free;
+    end;
+  _Result := TOpenMasterdataAPI_Result.Create;
+    try
+    try
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_GC.json'));
+    except
+      on E:Exception do
+      begin
+        //FLastErrorMessage := E.ClassName+' '+e.Message;
+        exit;
+      end;
+    end;
+    finally
+      _Result.Free;
+    end;
+  _Result := TOpenMasterdataAPI_Result.Create;
+    try
+    try
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Buderus.json'));
+    except
+      on E:Exception do
+      begin
+        //FLastErrorMessage := E.ClassName+' '+e.Message;
+        exit;
+      end;
+    end;
+    finally
+      _Result.Free;
+    end;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
@@ -134,6 +207,7 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientID',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecret',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
+  Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'UsernameRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'CustomernumberRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecretRequired',''));
@@ -173,13 +247,15 @@ begin
 
   if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
   begin
+    var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
+
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
                Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
+               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
   end;

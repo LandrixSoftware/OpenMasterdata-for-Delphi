@@ -45,8 +45,8 @@ type
   end;
 
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
-  private type
-    TOpenMasterdataApiClientGrantType = (omdgt_Password,omdgt_ClientCredentials);
+  public type
+    TGrantType = (omdgt_Password,omdgt_ClientCredentials);
   private
     FCS : TCriticalSection;
     FUsername,
@@ -56,8 +56,7 @@ type
     FClientSecret,
     FClientScope,
     FConnectionName : String;
-
-    FGrantType : TOpenMasterdataApiClientGrantType;
+    FGrantType : TGrantType;
 
     FAccessToken : String;
     FRefreshToken : String;
@@ -74,7 +73,7 @@ type
     function Login : Boolean;
     function RefreshLogin : Boolean;
   public
-    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String);
+    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType);
     destructor Destroy; override;
   public
     function GetConnectionName : String;
@@ -88,7 +87,8 @@ type
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
-    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String) : IOpenMasterdataApiClient;
+    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType) : IOpenMasterdataApiClient;
+    class function GetGrantTypeFromString(const _Val : String; _Default : TGrantType = TGrantType.omdgt_Password) : TGrantType;
   end;
 
 implementation
@@ -120,7 +120,7 @@ end;
 
 class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   _ConnectionName, _Username, _Password, _CustomerNumber, _ClientID,
-  _ClientSecret,_ClientScope: String): IOpenMasterdataApiClient;
+  _ClientSecret,_ClientScope: String; _GrantType : TGrantType): IOpenMasterdataApiClient;
 begin
   if openConnections = nil then
     openConnections := TInterfaceList.Create;
@@ -129,12 +129,13 @@ begin
     exit;
 
   Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-                  _CustomerNumber,_ClientID,_ClientSecret,_ClientScope);
+                  _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
   openConnections.Add(Result);
 end;
 
 constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username,
-  _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope: String);
+  _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope: String;
+  _GrantType : TGrantType);
 begin
   FConnectionName := _ConnectionName;
   FUsername := _Username;
@@ -143,10 +144,7 @@ begin
   FClientID := _ClientID;
   FClientSecret := _ClientSecret;
   FClientScope := _ClientScope;
-  if not FClientSecret.IsEmpty then
-    FGrantType := TOpenMasterdataApiClient.TOpenMasterdataApiClientGrantType.omdgt_ClientCredentials
-  else
-    FGrantType := TOpenMasterdataApiClient.TOpenMasterdataApiClientGrantType.omdgt_Password;
+  FGrantType := _GrantType;
   FCS := TCriticalSection.Create;
 
   FRESTClientOAuth:= TRESTClient.Create(nil);
@@ -234,12 +232,10 @@ begin
     RESTRequest.Method := rmPOST;
     case FGrantType of
       omdgt_Password:          RESTRequest.Params.AddItem('grant_type','password');
-      omdgt_ClientCredentials:
-      begin
-        RESTRequest.Params.AddItem('grant_type','client_credentials');
-        RESTRequest.Params.AddItem('client_secret',FClientSecret);
-      end;
+      omdgt_ClientCredentials: RESTRequest.Params.AddItem('grant_type','client_credentials');
     end;
+    if not FClientSecret.IsEmpty then
+      RESTRequest.Params.AddItem('client_secret',FClientSecret);
     if not FClientScope.IsEmpty then
       RESTRequest.Params.AddItem('scope',FClientScope);
     RESTRequest.Params.AddItem('client_id',FClientID);
@@ -435,6 +431,18 @@ end;
 function TOpenMasterdataApiClient.GetConnectionName: String;
 begin
   Result := FConnectionName;
+end;
+
+class function TOpenMasterdataApiClient.GetGrantTypeFromString(
+  const _Val: String; _Default: TGrantType): TGrantType;
+begin
+  if SameText(_Val,'client_credentials') then
+    Result := TOpenMasterdataApiClient.TGrantType.omdgt_ClientCredentials
+  else
+  if SameText(_Val,'password') then
+    Result := TOpenMasterdataApiClient.TGrantType.omdgt_Password
+  else
+    Result := _Default;
 end;
 
 procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
