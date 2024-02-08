@@ -1,21 +1,25 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Copyright (C) 2024 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+  http://www.apache.org/licenses/LICENSE-2.0
 
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
 }
 
 unit intf.OpenMasterdata.Types;
@@ -267,6 +271,70 @@ type
     property unit_ : String read Funit_ write Funit_;
   end;
 
+  TOpenMasterdataAPI_CarryingCategory = (
+      omdCarryingCategory_0,
+      omdCarryingCategory_1,
+      omdCarryingCategory_2,
+      omdCarryingCategory_3,
+      omdCarryingCategory_4
+    );
+
+  //Art der Verpackungseinheit
+  //Code Beschreibung
+  TOpenMasterdataAPI_PackageType = (
+      omdPackageType_BB, //BB = Rolle
+      omdPackageType_BG, //BG = Sack
+      omdPackageType_BH, //BH = Bund/Bündel
+      omdPackageType_BK, //BK = Korb
+      omdPackageType_CF, //CF = Kiste
+      omdPackageType_CG,//CG = Käfig
+      omdPackageType_CH,//CH = Gitterbox
+      omdPackageType_CT,//CT = Karton
+      omdPackageType_PA, //PA = Päckchen
+      omdPackageType_PC,//PC = Paket
+      omdPackageType_PG,//PG = Einwegpalette
+      omdPackageType_PK,//PK = Colli
+      omdPackageType_PN,//PN = Europalette
+      omdPackageType_PU, //PU = Kasten
+      omdPackageType_RG,//RG = Ring
+      omdPackageType_SC,//SC = Mischpalette
+      omdPackageType_HP, //HP = Halbpalette
+      omdPackageType_TU, //TU = Rohr
+      omdPackageType_BTL,//BTL = Beutel (Tüte)
+      omdPackageType_BX, //BX = Box
+      omdPackageType_CO, //CO = Container
+      omdPackageType_DY, //DY = Display
+      omdPackageType_STG,//STG = Stange
+      omdPackageType_TRO,//TRO = Trommel
+      omdPackageType_PLA,//PLA = Platte
+      omdPackageType_CI, //CI = Kanister
+      omdPackageType_GEB//GEB = Gebinde
+    );
+
+  TOpenMasterdataAPI_PackagingUnit = class
+  public
+    constructor Create;
+    destructor Destroy; override;
+  private
+    FmeasureB: TOpenMasterdataAPI_LogisticsMeasure;
+    FmeasureC: TOpenMasterdataAPI_LogisticsMeasure;
+    FmeasureA: TOpenMasterdataAPI_LogisticsMeasure;
+    FpackagingType: TOpenMasterdataAPI_PackageType;
+    Fgtin: String;
+    Fquantity: double;
+    Fweight: TOpenMasterdataAPI_LogisticsWeight;
+  public
+    property packagingType : TOpenMasterdataAPI_PackageType read FpackagingType write FpackagingType;
+    property quantity : double read Fquantity write Fquantity;
+    property gtin : String read Fgtin write Fgtin;
+    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
+    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
+    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
+    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+  end;
+
+  TOpenMasterdataAPI_PackagingUnitList = class(TObjectList<TOpenMasterdataAPI_PackagingUnit>);
+
   TOpenMasterdataAPI_Logistics = class
   private
     FmeasureB: TOpenMasterdataAPI_LogisticsMeasure;
@@ -275,15 +343,48 @@ type
     FhazardousMaterial: Boolean;
     Fexportable: Boolean;
     Fweight: TOpenMasterdataAPI_LogisticsWeight;
+    FcommodityNumber: Integer;
+    FcountryOfOrigin: String;
+    FpackagingDisposalProvider: String;
+    FstandardDeliveryPeriod: Integer;
+    FpackagingQuantity: Integer;
+    FubaListConform: Boolean;
+    FubaListRelevant: Boolean;
+    FpackagingUnits: TOpenMasterdataAPI_PackagingUnitList;
+    FreachInfo: String;
+    FlucidNumber: String;
+    FdangerClass: String;
+    FunNumber: String;
+    FweeeNumber: String;
+    FcarryingCategory: TOpenMasterdataAPI_CarryingCategory;
+    FreachDate: TDate;
+    FdurabilityPeriod: Integer;
   public
-    constructor Create; virtual;
+    constructor Create;
     destructor Destroy; override;
+  public
     property exportable : Boolean read Fexportable write Fexportable;
+    property commodityNumber : Integer read FcommodityNumber write FcommodityNumber;
+    property countryOfOrigin : String read FcountryOfOrigin write FcountryOfOrigin;
     property hazardousMaterial : Boolean read FhazardousMaterial write FhazardousMaterial;
+    property unNumber : String read FunNumber write FunNumber;
+    property dangerClass : String read FdangerClass write FdangerClass;
+    property carryingCategory : TOpenMasterdataAPI_CarryingCategory read FcarryingCategory write FcarryingCategory;
+    property reachInfo : String read FreachInfo write FreachInfo;
+    property reachDate : TDate read FreachDate write FreachDate;
+    property ubaListRelevant : Boolean read FubaListRelevant write FubaListRelevant;
+    property ubaListConform : Boolean read FubaListConform write FubaListConform;
+    property durabilityPeriod : Integer read FdurabilityPeriod write FdurabilityPeriod;
+    property standardDeliveryPeriod : Integer read FstandardDeliveryPeriod write FstandardDeliveryPeriod;
+    property lucidNumber : String read FlucidNumber write FlucidNumber;
+    property packagingDisposalProvider : String read FpackagingDisposalProvider write FpackagingDisposalProvider;
+    property weeeNumber : String read FweeeNumber write FweeeNumber;
     property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
     property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
     property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
     property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+    property packagingQuantity : Integer read FpackagingQuantity write FpackagingQuantity;
+    property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits write FpackagingUnits;
   end;
 
   TOpenMasterdataAPI_Price = class
@@ -320,7 +421,7 @@ type
     Fmatchcode: String;
     FmainCommodityGroupDescr: String;
   public
-    constructor Create; virtual;
+    constructor Create;
     destructor Destroy; override;
     property productType : String read FproductType write FproductType; //Artikeltyp -- Code Beschreibung\n- STD = Standardartikel\n- ERA = Ersatzteil A\n- ERB = Ersatzteil B\n- ERC = Ersatzteil C\n- VA = Variante\n- MA = Maßanfertigung\n- DLS = Dienstleistung / Software\n- PAK = Paket / Set\n- SON = Sonderartikel\n- KAL = Kalkulationsartikel\n- STG = Schüttgut\n",
     property startOfValidity : TDate read FstartOfValidity write FstartOfValidity; //Gültigkeitsbeginn
@@ -391,7 +492,7 @@ type
     FbillBasis : String;
     FrawMaterial: TOpenMasterdataAPI_Materials;
   public
-    constructor Create; virtual;
+    constructor Create;
     destructor Destroy; override;
 
     property listPrice : TOpenMasterdataAPI_Price read FlistPrice write FlistPrice;
@@ -463,7 +564,7 @@ type
     Fgtin: String;
     Fsparepartlists: TOpenMasterdataAPI_Sparepartlist;
   public
-    constructor Create; virtual;
+    constructor Create;
     destructor Destroy; override;
   public
     property supplierPid : String read FsupplierPid write FsupplierPid; //Artikelnummer innerhalb des angefragten Lieferanten (Großhandelsnummer)
@@ -484,6 +585,11 @@ type
   TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
   public
     procedure LoadFromJson(const _JsonValue : String);
+  end;
+
+  TOpenMasterdataHelper = class
+  public
+    class function FixJson(const _JsonValue : String) : String;
   end;
 
 implementation
@@ -589,6 +695,7 @@ begin
  FmeasureB := TOpenMasterdataAPI_LogisticsMeasure.Create;
  FmeasureC := TOpenMasterdataAPI_LogisticsMeasure.Create;
  Fweight := TOpenMasterdataAPI_LogisticsWeight.Create;
+ FpackagingUnits := TOpenMasterdataAPI_PackagingUnitList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Logistics.Destroy;
@@ -597,6 +704,7 @@ begin
   if Assigned(FmeasureB) then begin FmeasureB.Free; FmeasureB := nil; end;
   if Assigned(FmeasureC) then begin FmeasureC.Free; FmeasureC := nil; end;
   if Assigned(Fweight) then begin Fweight.Free; Fweight := nil; end;
+  if Assigned(FpackagingUnits) then begin FpackagingUnits.Free; FpackagingUnits := nil; end;
   inherited;
 end;
 
@@ -640,7 +748,9 @@ var
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
   //jsonValueFound : Boolean;
 begin
-  messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
+  messageJson := TJSONObject.ParseJSONValue(
+       TOpenMasterdataHelper.FixJson(_JsonValue),
+       false,true) as TJSONValue;
 
   if messageJson = nil then
     exit;
@@ -659,10 +769,6 @@ begin
 
     if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
     begin
-  //    if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then //entspricht Spezifikation
-  //      jsonValueFound := true else
-  //    if jsonValue.TryGetValue<TJSONValue>('listprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-  //      jsonValueFound := true else jsonValueFound := false;
       if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
       begin
         if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
@@ -685,10 +791,6 @@ begin
         if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
           prices.rrp.quantityUnit := jsonString.Value;
       end;
-  //    if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then //entspricht Spezifikation
-  //      jsonValueFound := true else
-  //    if jsonValue.TryGetValue<TJSONValue>('netprice',jsonValue2) then //entspricht nicht der Spezifikation - Mosecker
-  //      jsonValueFound := true else jsonValueFound := false;
       if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
       begin
         if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
@@ -780,10 +882,16 @@ begin
       if jsonValue.TryGetValue<TJSONString>('marketingText',jsonString) then
         descriptions.marketingText := jsonString.Value;
     end;
-  //    "logistics": {
-  //        "exportable": true,
-  //        "countryOfOrigin": "DE",
-  //        "hazardousMaterial": false,
+    if messageJson.TryGetValue<TJSONValue>('logistics',jsonValue) then
+    begin
+      if jsonValue.TryGetValue<TJSONBool>('exportable',jsonBool) then
+        logistics.exportable := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONString>('commodityNumber',jsonString) then
+        logistics.commodityNumber := StrToIntDef(jsonString.Value,0);
+      if jsonValue.TryGetValue<TJSONString>('countryOfOrigin',jsonString) then
+        logistics.countryOfOrigin := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONBool>('hazardousMaterial',jsonBool) then
+        logistics.hazardousMaterial := jsonBool.AsBoolean;
   //        "unNumber": "",
   //        "dangerClass": "",
   //        "reachInfo": "no data",
@@ -796,7 +904,7 @@ begin
   //        "packagingDisposalProvider": "",
   //        "weeeNumber": "",
   //        "packagingQuantity": 1
-  //    },
+    end;
     if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
     for jsonValue in jsonArray do
     begin
@@ -889,6 +997,36 @@ begin
 //    Insert('-',_Val,);
   end;
   Result := ISO8601ToDate(_Val);
+end;
+
+{ TOpenMasterdataAPI_PackagingUnit }
+
+constructor TOpenMasterdataAPI_PackagingUnit.Create;
+begin
+ FmeasureA := TOpenMasterdataAPI_LogisticsMeasure.Create;
+ FmeasureB := TOpenMasterdataAPI_LogisticsMeasure.Create;
+ FmeasureC := TOpenMasterdataAPI_LogisticsMeasure.Create;
+ Fweight := TOpenMasterdataAPI_LogisticsWeight.Create;
+end;
+
+destructor TOpenMasterdataAPI_PackagingUnit.Destroy;
+begin
+  if Assigned(FmeasureA) then begin FmeasureA.Free; FmeasureA := nil; end;
+  if Assigned(FmeasureB) then begin FmeasureB.Free; FmeasureB := nil; end;
+  if Assigned(FmeasureC) then begin FmeasureC.Free; FmeasureC := nil; end;
+  if Assigned(Fweight) then begin Fweight.Free; Fweight := nil; end;
+  inherited;
+end;
+
+{ TOpenMasterdataHelper }
+
+class function TOpenMasterdataHelper.FixJson(const _JsonValue: String): String;
+begin
+  //JSON-Korrektur
+  //Ungültiges JSON Wiedemann
+  Result := _JsonValue;
+  if Pos('"gtin": 0',Result)>0 then
+    Result := ReplaceText(Result,'"gtin": 0','"gtin": ');
 end;
 
 end.

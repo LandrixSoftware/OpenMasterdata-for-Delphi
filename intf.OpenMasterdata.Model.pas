@@ -1,7 +1,7 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Copyright (C) 2024 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 This program is free software: you can redistribute it and/or modify
@@ -239,10 +239,21 @@ begin
   localFormatSettings := System.SysUtils.FormatSettings;
   localFormatSettings.DecimalSeparator := '.';
   localFormatSettings.ThousandSeparator := ',';
-  prices.listPrice.value := StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings);
-  prices.listPrice.currency := _Val.prices.listPrice.currency;
-  prices.listPrice.basis := _Val.prices.listPrice.basis;
-  prices.listPrice.quantityUnit := _Val.prices.listPrice.quantityUnit;
+  //Buderus,...
+  if (StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings) = 0) and
+     (StrToCurrDef(_Val.prices.rrp.value,0,localFormatSettings) <> 0) then
+  begin
+    prices.listPrice.value := StrToCurrDef(_Val.prices.rrp.value,0,localFormatSettings);
+    prices.listPrice.currency := _Val.prices.rrp.currency;
+    prices.listPrice.basis := _Val.prices.rrp.basis;
+    prices.listPrice.quantityUnit := _Val.prices.rrp.quantityUnit;
+  end else
+  begin
+    prices.listPrice.value := StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings);
+    prices.listPrice.currency := _Val.prices.listPrice.currency;
+    prices.listPrice.basis := _Val.prices.listPrice.basis;
+    prices.listPrice.quantityUnit := _Val.prices.listPrice.quantityUnit;
+  end;
   prices.netPrice.value := StrToCurrDef(_Val.prices.netPrice.value,0,localFormatSettings);
   prices.netPrice.currency := _Val.prices.netPrice.currency;
   prices.netPrice.basis := _Val.prices.netPrice.basis;

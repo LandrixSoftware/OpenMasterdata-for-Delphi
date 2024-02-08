@@ -1,22 +1,27 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Copyright (C) 2024 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+  http://www.apache.org/licenses/LICENSE-2.0
 
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
 }
+
 unit intf.OpenMasterdata;
 
 interface
@@ -39,9 +44,11 @@ type
     procedure SetBySupplierPIDURL(const _URL : String);
 
     function GetConnectionName : String;
+    function GetCurrentAuthorizationToken : String;
     function GetLastOAuthResponseContent : String;
     function GetLastBySupplierPIDResponseContent : String;
     function GetLastErrorMessage : String;
+    function GetLastErrorCode : Integer;
   end;
 
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
@@ -61,6 +68,7 @@ type
     FAccessToken : String;
     FRefreshToken : String;
     FAccessTokenValidTo : TDateTime;
+    //FCookie : String;
 
     FRESTClientOAuth: TRESTClient;
     FRESTClientBySupplierPID: TRESTClient;
@@ -68,6 +76,7 @@ type
     FLastOAuthResponseContent : String;
     FLastBySupplierPIDResponseContent : String;
     FLastErrorMessage : String;
+    FLastErrorCode : Integer;
 
     function LoggedIn: Boolean;
     function Login : Boolean;
@@ -77,9 +86,11 @@ type
     destructor Destroy; override;
   public
     function GetConnectionName : String;
+    function GetCurrentAuthorizationToken : String;
     function GetLastOAuthResponseContent : String;
     function GetLastBySupplierPIDResponseContent : String;
     function GetLastErrorMessage : String;
+    function GetLastErrorCode : Integer;
 
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
@@ -155,10 +166,12 @@ begin
   FLastOAuthResponseContent := '';
   FLastBySupplierPIDResponseContent := '';
   FLastErrorMessage := '';
+  FLastErrorCode := 0;
 
   FAccessToken := '';
   FRefreshToken := '';
   FAccessTokenValidTo := 0;
+  //FCookie := '';
 end;
 
 destructor TOpenMasterdataApiClient.Destroy;
@@ -172,6 +185,11 @@ end;
 function TOpenMasterdataApiClient.GetLastBySupplierPIDResponseContent: String;
 begin
   Result := FLastBySupplierPIDResponseContent;
+end;
+
+function TOpenMasterdataApiClient.GetLastErrorCode: Integer;
+begin
+  Result := FLastErrorCode;
 end;
 
 function TOpenMasterdataApiClient.GetLastErrorMessage: String;
@@ -216,9 +234,11 @@ begin
 
   FLastOAuthResponseContent := '';
   FLastErrorMessage := '';
+  FLastErrorCode := 0;
 
   FAccessToken := '';
   FRefreshToken := '';
+  //FCookie := '';
 
   //TOAuth2Authenticator?
 
@@ -256,6 +276,7 @@ begin
     if not RESTResponse.Status.SuccessOK_200 then
     begin
       FLastErrorMessage := RESTResponse.StatusText;
+      FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
 
@@ -273,6 +294,8 @@ begin
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
       FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      //if RESTResponse.Cookies.Count > 0 then
+      //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
       Result := true;
     except
@@ -303,8 +326,10 @@ begin
 
   FLastOAuthResponseContent := '';
   FLastErrorMessage := '';
+  FLastErrorCode := 0;
 
   FAccessToken := '';
+  //FCookie := '';
   if FRefreshToken.IsEmpty then
     exit;
 
@@ -325,6 +350,7 @@ begin
     if not RESTResponse.Status.SuccessOK_200 then
     begin
       FLastErrorMessage := RESTResponse.StatusText;
+      FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
 
@@ -342,6 +368,8 @@ begin
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
       FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      //if RESTResponse.Cookies.Count > 0 then
+      //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
       Result := true;
     except
@@ -377,6 +405,7 @@ begin
 
   FLastBySupplierPIDResponseContent := '';
   FLastErrorMessage := '';
+  FLastErrorCode := 0;
 
   if _SupplierPid.IsEmpty then
     exit;
@@ -391,16 +420,19 @@ begin
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientBySupplierPID;
     RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
+    //if FCookie <> '' then
+    //  RESTRequest.AddAuthParameter('Cookie',FCookie,TRESTRequestParameterKind.pkCOOKIE, [TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Method := rmGET;
     //RESTRequest.URLAlreadyEncoded := true;
-    RESTRequest.AddParameter('supplierPid',TNetEncoding.URL.Encode(_SupplierPid),TRESTRequestParameterKind.pkGETorPOST,[TRESTRequestParameterOption.poDoNotEncode]);
-    RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkGETorPOST,[TRESTRequestParameterOption.poDoNotEncode]);
+    RESTRequest.AddParameter('supplierPid',TNetEncoding.URL.Encode(_SupplierPid),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
     RESTRequest.Execute;
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
       FLastErrorMessage := RESTResponse.StatusText;
+      FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
 
@@ -433,6 +465,11 @@ begin
   Result := FConnectionName;
 end;
 
+function TOpenMasterdataApiClient.GetCurrentAuthorizationToken: String;
+begin
+  Result := FAccessToken;
+end;
+
 class function TOpenMasterdataApiClient.GetGrantTypeFromString(
   const _Val: String; _Default: TGrantType): TGrantType;
 begin
@@ -449,6 +486,10 @@ procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
   const _URL : String);
 begin
   FRESTClientBySupplierPID.BaseURL := _URL;
+  FRESTClientBySupplierPID.Accept  := 'application/json';
+  FRESTClientBySupplierPID.AcceptCharSet := 'UTF-8';
+  FRESTClientBySupplierPID.ContentType   := 'application/json';
+  FRESTClientBySupplierPID.HandleRedirects := true;
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);

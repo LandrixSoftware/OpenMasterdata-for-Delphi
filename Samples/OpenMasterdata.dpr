@@ -3,7 +3,7 @@
 {
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2022 Landrix Software GmbH & Co. KG
+Copyright (C) 2024 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 This program is free software: you can redistribute it and/or modify

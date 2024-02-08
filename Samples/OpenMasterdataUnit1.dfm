@@ -71,6 +71,7 @@ object MainForm: TMainForm
     Height = 23
     Style = csDropDownList
     Anchors = [akLeft, akTop, akRight]
+    DropDownCount = 20
     TabOrder = 2
     OnSelect = ComboBox1Select
   end
@@ -97,7 +98,10 @@ object MainForm: TMainForm
     Height = 287
     Anchors = [akLeft, akTop, akRight, akBottom]
     TabOrder = 5
+    AllowSingleSignOnUsingOSPrimaryAccount = False
+    TargetCompatibleBrowserVersion = '117.0.2045.28'
     UserDataFolder = '%LOCALAPPDATA%\bds.exe.WebView2'
+    OnWebResourceRequested = EdgeBrowser1WebResourceRequested
   end
   object CheckListBox1: TCheckListBox
     Left = 638
