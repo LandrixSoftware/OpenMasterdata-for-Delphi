@@ -36,6 +36,7 @@ type
   TOpenMasterdataAPIHelper = class(TObject)
   public
     class function JSONStrToDate(_Val : String) : TDate;
+    class function JSONStrToFloat(_Val : String) : double;
   end;
 
   TOpenMasterdataAPI_AuthResult = class
@@ -150,25 +151,49 @@ type
   TOpenMasterdataAPI_SetList = class(TObjectList<TOpenMasterdataAPI_Set>)
   end;
 
+  TOpenMasterdataAPI_LinkedProduct = class(TObject)
+  private
+    FproductShortDescr: String;
+    FmanufacturerPid: String;
+    Fgtin: String;
+    FmanufacturerId: String;
+    FimageLink: String;
+    FthumbnailUrl: String;
+    FsupplierPid: String;
+  public
+    property supplierPid : String read FsupplierPid write FsupplierPid;
+    property manufacturerId : String read FmanufacturerId write FmanufacturerId;
+    property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid;
+    property gtin : String read Fgtin write Fgtin;
+    property productShortDescr : String read FproductShortDescr write FproductShortDescr;
+    property imageLink : String read FimageLink write FimageLink;
+    property thumbnailUrl : String read FthumbnailUrl write FthumbnailUrl;
+  end;
+
+  TOpenMasterdataAPI_LinkedProductList = class(TObjectList<TOpenMasterdataAPI_LinkedProduct>)
+  end;
+
   TOpenMasterdataAPI_Additional = class
   private
     FexpiringProduct: String;
-    FminOrderQuantity: String;
+    FminOrderQuantity: double;
     FdeepLink: String;
     FminOrderUnit: String;
     Fsets: TOpenMasterdataAPI_SetList;
     Faccessories: TOpenMasterdataAPI_AccessoryList;
     FexpiringDate: TDate;
     FarticleNumberCatalogue: String;
+    FalternativeProduct: TOpenMasterdataAPI_LinkedProductList;
+    FfollowupProduct: TOpenMasterdataAPI_LinkedProductList;
   public
     constructor Create;
     destructor Destroy; override;
 
-    property minOrderQuantity : String read FminOrderQuantity write FminOrderQuantity; //Mindestbestellmenge
+    property minOrderQuantity : double read FminOrderQuantity write FminOrderQuantity; //Mindestbestellmenge
     property minOrderUnit : String read FminOrderUnit write FminOrderUnit; //Units (Mengeneinheiten) -- Code Beschreibung\n- CMK = Quadratzentimeter\n- CMQ = Kubikzentimeter\n- CMT = Zentimeter\n- DZN = Dutzend\n- GRM = Gramm\n- HLT = Hektoliter\n- KGM = Kilogramm\n- KTM = Kilometer\n- LTR = Liter\n- MMT = Millimeter\n- MTK = Quadratmeter\n- MTQ = Kubikmeter\n- MTR = Meter\n- PCE = Stück\n- PR = Paar\n- SET = Satz\n- TNE = Tonne
     property articleNumberCatalogue : String read FarticleNumberCatalogue write FarticleNumberCatalogue; //max 15 Werksartikelnummer Katalog
-    //TODO property alternativeProduct //array #/components/schemas/AlternativeProduct
-    //TODO property followupProduct //components/schemas/FollowupProduct
+    property alternativeProduct : TOpenMasterdataAPI_LinkedProductList read FalternativeProduct write FalternativeProduct;
+    property followupProduct : TOpenMasterdataAPI_LinkedProductList read FfollowupProduct write FfollowupProduct;
     property deepLink : String read FdeepLink write FdeepLink; //max 256 Deeplink zum Artikel
     property expiringProduct : String read FexpiringProduct write FexpiringProduct; //enum" : [ true, "Yes-Successor", false ] Auslaufartikel\n  - Yes = Artikel ist Auslauf\n  - Yes-Successor = Artikel ist Auslauf und Nachfolgeartikel existiert\n  - No = Artikel ist nicht Auslauf
     property expiringDate : TDate read FexpiringDate write FexpiringDate; //Auslaufdatum
@@ -280,7 +305,6 @@ type
     );
 
   //Art der Verpackungseinheit
-  //Code Beschreibung
   TOpenMasterdataAPI_PackageType = (
       omdPackageType_BB, //BB = Rolle
       omdPackageType_BG, //BG = Sack
@@ -308,8 +332,15 @@ type
       omdPackageType_TRO,//TRO = Trommel
       omdPackageType_PLA,//PLA = Platte
       omdPackageType_CI, //CI = Kanister
-      omdPackageType_GEB//GEB = Gebinde
+      omdPackageType_GEB,//GEB = Gebinde
+      omdPackageType_Unknown
     );
+
+  TOpenMasterdataAPI_PackageTypeHelper = class(TObject)
+  public
+    class function PackageTypeToStr(_Val : TOpenMasterdataAPI_PackageType) : String;
+    class function PackageTypeFromStr(_Val : String) : TOpenMasterdataAPI_PackageType;
+  end;
 
   TOpenMasterdataAPI_PackagingUnit = class
   public
@@ -438,46 +469,46 @@ type
     property modelNumber : String read FmodelNumber write FmodelNumber; //max 15 Modell
   end;
 
-  TOpenMasterdataAPI_Material = class
+  //Rohstoffangaben
+  TOpenMasterdataAPI_RawMaterial = (
+    rawMaterial_AL, //Aluminium
+    rawMaterial_PB, //Blei
+    rawMaterial_CR, //Chrom
+    rawMaterial_AU, //Gold
+    rawMaterial_CD, //Kadmium
+    rawMaterial_CU, //Kupfer
+    rawMaterial_MG, //Magnesium
+    rawMaterial_MS, //Messing
+    rawMaterial_NI, //Nickel
+    rawMaterial_PL, //Platin
+    rawMaterial_AG, //Silber
+    rawMaterial_W,  //Wolfram
+    rawMaterial_ZN, //Zink
+    rawMaterial_SN,  //Zinn
+    rawMaterial_Unknown
+    );
+
+  TOpenMasterdataAPI_RawMaterialHelper = class(TObject)
   public
-//"Material" : {
-//          "type" : "object",
-//          "description" : "Rohstoff",
-//          "required" : [ "material", "weightBasis", "basisUnit", "proportionByWeight", "proportionUnit", "quotationOfRawMaterial" ],
-//          "properties" : {
-//            "material" : {
-//              "$ref" : "#/components/schemas/RawMaterial"
+    class function RawMaterialToStr(_Val : TOpenMasterdataAPI_RawMaterial) : String;
+    class function RawMaterialFromStr(_Val : String) : TOpenMasterdataAPI_RawMaterial;
+  end;
 
-
-//        "RawMaterial" : {
-//          "type" : "string",
-//          "description" : "Rohstoffangaben\nCode Beschreibung\n-  AL = Aluminium\n-  PB = Blei\n-  CR = Chrom\n-  AU = Gold\n-  CD = Kadmium\n-  CU = Kupfer\n-  MG = Magnesium\n-  MS = Messing\n-  NI = Nickel\n-  PL = Platin\n-  AG = Silber\n-  W  = Wolfram\n-  ZN = Zink\n-  SN = Zinn\n",
-//          "enum" : [ "AL", "PB", "CR", "AU", "CD", "CU", "MG", "MS", "NI", "PL", "AG", "W", "ZN", "SN" ]
-//        },
-
-
-//            },
-//            "weightBasis" : {
-//              "type" : "string",
-//              "pattern" : "^\\d{1,18}\\.\\d{1,4}?$",
-//              "description" : "Gewichtsbasis. Basisangabe, auf die sich das Gewicht bezieht."
-//            },
-//            "basisUnit" : {
-//              "$ref" : "#/components/schemas/Unit"
-//            },
-//            "proportionByWeight" : {
-//              "type" : "string",
-//              "pattern" : "^\\d{1,18}\\.\\d{1,4}?$",
-//              "description" : "Gewichtsanteil des Rohstoffs"
-//            },
-//            "proportionUnit" : {
-//              "$ref" : "#/components/schemas/Unit"
-//            },
-//            "quotationOfRawMaterial" : {
-//              "type" : "string",
-//              "pattern" : "^\\d{1,15}\\.\\d{1,2}?$",
-//              "description" : "Notierung (pro 100 KG) des Rohstoffs, welcher im Preis bereits einkalkuliert ist."
-//            }
+  TOpenMasterdataAPI_Material = class
+  private
+    FbasisUnit: String;
+    Fmaterial: TOpenMasterdataAPI_RawMaterial;
+    FproportionUnit: String;
+    FquotationOfRawMaterial: double;
+    FweightBasis: double;
+    FproportionByWeight: double;
+  public
+    property material : TOpenMasterdataAPI_RawMaterial read Fmaterial write Fmaterial;
+    property weightBasis : double read FweightBasis write FweightBasis;
+    property basisUnit: String read FbasisUnit write FbasisUnit;
+    property proportionByWeight : double read FproportionByWeight write FproportionByWeight;
+    property proportionUnit : String read FproportionUnit write FproportionUnit;
+    property quotationOfRawMaterial : double read FquotationOfRawMaterial write FquotationOfRawMaterial;
   end;
 
   TOpenMasterdataAPI_Materials = class(TObjectList<TOpenMasterdataAPI_Material>)
@@ -676,12 +707,16 @@ end;
 
 constructor TOpenMasterdataAPI_Additional.Create;
 begin
+  FalternativeProduct := TOpenMasterdataAPI_LinkedProductList.Create;
+  FfollowupProduct := TOpenMasterdataAPI_LinkedProductList.Create;
   Faccessories := TOpenMasterdataAPI_AccessoryList.Create;
   Fsets := TOpenMasterdataAPI_SetList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Additional.Destroy;
 begin
+  if Assigned(FalternativeProduct) then begin FalternativeProduct.Free; FalternativeProduct := nil; end;
+  if Assigned(FfollowupProduct) then begin FfollowupProduct.Free; FfollowupProduct := nil; end;
   if Assigned(Faccessories) then begin Faccessories.Free; Faccessories := nil; end;
   if Assigned(Fsets) then begin Fsets.Free; Fsets := nil; end;
   inherited;
@@ -746,7 +781,31 @@ var
   jsonArray : TJSONArray;
   jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
-  //jsonValueFound : Boolean;
+
+  procedure LoadMeasureUnitFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LogisticsMeasure);
+  var jsonString2  : TJSONString;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('measure',jsonString2) then
+      _Result.measure := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('unit',jsonString2) then
+      _Result.unit_ := jsonString2.Value;
+  end;
+
+  procedure LoadWeightFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LogisticsWeight);
+  var jsonString2  : TJSONString;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('weight',jsonString2) then
+      _Result.weight := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('unit',jsonString2) then
+      _Result.unit_ := jsonString2.Value;
+  end;
+
 begin
   messageJson := TJSONObject.ParseJSONValue(
        TOpenMasterdataHelper.FixJson(_JsonValue),
@@ -807,7 +866,25 @@ begin
         prices.taxCode := jsonNumber.AsInt;
       if jsonValue.TryGetValue<TJSONString>('billBasis',jsonString) then
         prices.billBasis := jsonString.Value;
-      //TODO rawMaterial
+      if jsonValue.TryGetValue<TJSONArray>('rawMaterial',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemMaterial : TOpenMasterdataAPI_Material := TOpenMasterdataAPI_Material.Create;
+        prices.rawMaterial.Add(itemMaterial);
+
+        if jsonValue2.TryGetValue<TJSONString>('material',jsonString) then
+          itemMaterial.material := TOpenMasterdataAPI_RawMaterialHelper.RawMaterialFromStr(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('weightBasis',jsonString) then
+          itemMaterial.weightBasis := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('basisUnit',jsonString) then
+          itemMaterial.basisUnit := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('proportionByWeight',jsonString) then
+          itemMaterial.proportionByWeight := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('proportionUnit',jsonString) then
+          itemMaterial.proportionUnit := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('quotationOfRawMaterial',jsonString) then
+          itemMaterial.quotationOfRawMaterial := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+      end;
     end;
     if messageJson.TryGetValue<TJSONValue>('basic',jsonValue) then
     begin
@@ -849,14 +926,60 @@ begin
     end;
     if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
     begin
-  //        "minOrderQuantity": "1.000",
-  //        "minOrderUnit": "PCE",
-  //        "articleNumberCatalogue": "",
-  //        "alternativeProduct": [],
-  //        "followupProduct": [],
+      if jsonValue.TryGetValue<TJSONString>('minOrderQuantity',jsonString) then
+        additional.minOrderQuantity := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+      if jsonValue.TryGetValue<TJSONString>('minOrderUnit',jsonString) then
+        additional.minOrderUnit := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('articleNumberCatalogue',jsonString) then
+        additional.articleNumberCatalogue := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONArray>('alternativeProduct',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemAlternativeProduct : TOpenMasterdataAPI_LinkedProduct := TOpenMasterdataAPI_LinkedProduct.Create;
+        additional.alternativeProduct.Add(itemAlternativeProduct);
+
+        if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
+          itemAlternativeProduct.supplierPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
+          itemAlternativeProduct.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
+          itemAlternativeProduct.manufacturerPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+          itemAlternativeProduct.gtin := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+          itemAlternativeProduct.productShortDescr := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('imageLink',jsonString) then
+          itemAlternativeProduct.imageLink := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
+          itemAlternativeProduct.thumbnailUrl := jsonString.Value;
+      end;
+      if jsonValue.TryGetValue<TJSONArray>('followupProduct',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemFollowupProduct : TOpenMasterdataAPI_LinkedProduct := TOpenMasterdataAPI_LinkedProduct.Create;
+        additional.followupProduct.Add(itemFollowupProduct);
+
+        if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
+          itemFollowupProduct.supplierPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
+          itemFollowupProduct.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
+          itemFollowupProduct.manufacturerPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+          itemFollowupProduct.gtin := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+          itemFollowupProduct.productShortDescr := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('imageLink',jsonString) then
+          itemFollowupProduct.imageLink := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
+          itemFollowupProduct.thumbnailUrl := jsonString.Value;
+      end;
       if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
         additional.deepLink := jsonString.Value;
-  //        "deepLink": "https://www.mosecker-online.de/online3/artikelauskunft.csp?Artikel=09%2B10044",
+//      additional.expiringProduct
+//      additional.expiringDate
+//      additional.accessories
+//      additional.sets
   //        "expiringProduct": "No",
   //        "commodityGroupIdManufacturer": "",
   //        "commodityGroupDescrManufacturer": "",
@@ -892,18 +1015,55 @@ begin
         logistics.countryOfOrigin := jsonString.Value;
       if jsonValue.TryGetValue<TJSONBool>('hazardousMaterial',jsonBool) then
         logistics.hazardousMaterial := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONString>('reachInfo',jsonString) then
+        logistics.reachInfo := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('reachDate',jsonString) then
+        logistics.reachDate := TOpenMasterdataAPIHelper.JSONStrToDate(jsonString.Value);
+      if jsonValue.TryGetValue<TJSONString>('durabilityPeriod',jsonString) then
+        logistics.durabilityPeriod := StrToIntDef(jsonString.Value,0);
+      if jsonValue.TryGetValue<TJSONString>('standardDeliveryPeriod',jsonString) then
+        logistics.standardDeliveryPeriod := StrToIntDef(jsonString.Value,0);
+      if jsonValue.TryGetValue<TJSONString>('lucidNumber',jsonString) then
+        logistics.lucidNumber := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('packagingDisposalProvider',jsonString) then
+        logistics.packagingDisposalProvider := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONValue>('measureA',jsonValue2) then
+        LoadMeasureUnitFromJson(jsonValue2,logistics.measureA);
+      if jsonValue.TryGetValue<TJSONValue>('measureB',jsonValue2) then
+        LoadMeasureUnitFromJson(jsonValue2,logistics.measureB);
+      if jsonValue.TryGetValue<TJSONValue>('measureC',jsonValue2) then
+        LoadMeasureUnitFromJson(jsonValue2,logistics.measureC);
+      if jsonValue.TryGetValue<TJSONValue>('weight',jsonValue2) then
+        LoadWeightFromJson(jsonValue2,logistics.weight);
+      if jsonValue.TryGetValue<TJSONString>('packagingQuantity',jsonString) then
+        logistics.packagingQuantity := StrToIntDef(jsonString.Value,0);
+      if jsonValue.TryGetValue<TJSONArray>('packagingUnits',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemPackagingUnit : TOpenMasterdataAPI_PackagingUnit := TOpenMasterdataAPI_PackagingUnit.Create;
+        logistics.packagingUnits.Add(itemPackagingUnit);
+
+        if jsonValue2.TryGetValue<TJSONString>('packagingType',jsonString) then
+          itemPackagingUnit.packagingType := TOpenMasterdataAPI_PackageTypeHelper.PackageTypeFromStr(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('quantity',jsonString) then
+          itemPackagingUnit.quantity := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+          itemPackagingUnit.gtin := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONValue>('measureA',jsonValue3) then
+          LoadMeasureUnitFromJson(jsonValue3,itemPackagingUnit.measureA);
+        if jsonValue2.TryGetValue<TJSONValue>('measureB',jsonValue3) then
+          LoadMeasureUnitFromJson(jsonValue3,itemPackagingUnit.measureB);
+        if jsonValue2.TryGetValue<TJSONValue>('measureC',jsonValue3) then
+          LoadMeasureUnitFromJson(jsonValue3,itemPackagingUnit.measureC);
+        if jsonValue2.TryGetValue<TJSONValue>('weight',jsonValue3) then
+          LoadWeightFromJson(jsonValue3,itemPackagingUnit.weight);
+      end;
   //        "unNumber": "",
   //        "dangerClass": "",
-  //        "reachInfo": "no data",
   //        "reachData": "",
   //        "ubaListRelevant": false,
   //        "ubaListConform": false,
-  //        "durabilityPeriod": 99,
-  //        "standardDeliveryPeriod": 14,
-  //        "lucidNumber": "",
-  //        "packagingDisposalProvider": "",
   //        "weeeNumber": "",
-  //        "packagingQuantity": 1
     end;
     if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
     for jsonValue in jsonArray do
@@ -991,12 +1151,20 @@ begin
   _Val := Trim(_Val);
   if _Val = '' then
     exit;
-  if (Length(_Val) = 8) and (Pos('-',_Val)=0) then
+  if (Length(_Val) = 8) and (Pos('-',_Val) = 0) then
   begin
     exit;
-//    Insert('-',_Val,);
   end;
   Result := ISO8601ToDate(_Val);
+end;
+
+class function TOpenMasterdataAPIHelper.JSONStrToFloat(_Val: String): double;
+var
+  fs : TFormatSettings;
+begin
+  fs.ThousandSeparator := ',';
+  fs.DecimalSeparator := '.';
+  Result := StrToFloatDef(_Val,0,fs);
 end;
 
 { TOpenMasterdataAPI_PackagingUnit }
@@ -1027,6 +1195,202 @@ begin
   Result := _JsonValue;
   if Pos('"gtin": 0',Result)>0 then
     Result := ReplaceText(Result,'"gtin": 0','"gtin": ');
+end;
+
+{ TOpenMasterdataAPI_PackageTypeHelper }
+
+class function TOpenMasterdataAPI_PackageTypeHelper.PackageTypeFromStr(
+  _Val: String): TOpenMasterdataAPI_PackageType;
+begin
+  if SameText(_Val,'BB') then
+    Result := omdPackageType_BB //BB = Rolle
+  else
+  if SameText(_Val,'BG') then
+    Result := omdPackageType_BG //BG = Sack
+  else
+  if SameText(_Val,'BH') then
+    Result := omdPackageType_BH //BH = Bund/Bündel
+  else
+  if SameText(_Val,'BK') then
+    Result := omdPackageType_BK //BK = Korb
+  else
+  if SameText(_Val,'CF') then
+    Result := omdPackageType_CF //CF = Kiste
+  else
+  if SameText(_Val,'CG') then
+    Result := omdPackageType_CG//CG = Käfig
+  else
+  if SameText(_Val,'CH') then
+    Result := omdPackageType_CH//CH = Gitterbox
+  else
+  if SameText(_Val,'CT') then
+    Result := omdPackageType_CT//CT = Karton
+  else
+  if SameText(_Val,'PA') then
+    Result := omdPackageType_PA //PA = Päckchen
+  else
+  if SameText(_Val,'PC') then
+    Result := omdPackageType_PC//PC = Paket
+  else
+  if SameText(_Val,'PG') then
+    Result := omdPackageType_PG//PG = Einwegpalette
+  else
+  if SameText(_Val,'PK') then
+    Result := omdPackageType_PK//PK = Colli
+  else
+  if SameText(_Val,'PN') then
+    Result := omdPackageType_PN//PN = Europalette
+  else
+  if SameText(_Val,'PU') then
+    Result := omdPackageType_PU //PU = Kasten
+  else
+  if SameText(_Val,'RG') then
+    Result := omdPackageType_RG//RG = Ring
+  else
+  if SameText(_Val,'SC') then
+    Result := omdPackageType_SC//SC = Mischpalette
+  else
+  if SameText(_Val,'HP') then
+    Result := omdPackageType_HP //HP = Halbpalette
+  else
+  if SameText(_Val,'TU') then
+    Result := omdPackageType_TU //TU = Rohr
+  else
+  if SameText(_Val,'BTL') then
+    Result := omdPackageType_BTL//BTL = Beutel (Tüte)
+  else
+  if SameText(_Val,'BX') then
+    Result := omdPackageType_BX //BX = Box
+  else
+  if SameText(_Val,'CO') then
+    Result := omdPackageType_CO //CO = Container
+  else
+  if SameText(_Val,'DY') then
+    Result := omdPackageType_DY //DY = Display
+  else
+  if SameText(_Val,'STG') then
+    Result := omdPackageType_STG//STG = Stange
+  else
+  if SameText(_Val,'TRO') then
+    Result := omdPackageType_TRO//TRO = Trommel
+  else
+  if SameText(_Val,'PLA') then
+    Result := omdPackageType_PLA//PLA = Platte
+  else
+  if SameText(_Val,'CI') then
+    Result := omdPackageType_CI //CI = Kanister
+  else
+  if SameText(_Val,'GEB') then
+    Result := omdPackageType_GEB//GEB = Gebinde
+  else
+    Result := omdPackageType_Unknown;
+end;
+
+class function TOpenMasterdataAPI_PackageTypeHelper.PackageTypeToStr(
+  _Val: TOpenMasterdataAPI_PackageType): String;
+begin
+  case _Val of
+    omdPackageType_BB: Result := 'BB';
+    omdPackageType_BG: Result := 'BG';
+    omdPackageType_BH: Result := 'BH';
+    omdPackageType_BK: Result := 'BK';
+    omdPackageType_CF: Result := 'CF';
+    omdPackageType_CG: Result := 'CG';
+    omdPackageType_CH: Result := 'CH';
+    omdPackageType_CT: Result := 'CT';
+    omdPackageType_PA: Result := 'PA';
+    omdPackageType_PC: Result := 'PC';
+    omdPackageType_PG: Result := 'PG';
+    omdPackageType_PK: Result := 'PK';
+    omdPackageType_PN: Result := 'PN';
+    omdPackageType_PU: Result := 'PU';
+    omdPackageType_RG: Result := 'RG';
+    omdPackageType_SC: Result := 'SC';
+    omdPackageType_HP: Result := 'HP';
+    omdPackageType_TU: Result := 'TU';
+    omdPackageType_BTL:Result := 'BTL' ;
+    omdPackageType_BX: Result := 'BX';
+    omdPackageType_CO: Result := 'CO';
+    omdPackageType_DY: Result := 'DY';
+    omdPackageType_STG: Result := 'STG';
+    omdPackageType_TRO: Result := 'TRO';
+    omdPackageType_PLA: Result := 'PLA';
+    omdPackageType_CI: Result := 'CI';
+    omdPackageType_GEB: Result := 'GEB';
+    else Result := '';
+  end;
+end;
+
+{ TOpenMasterdataAPI_RawMaterialHelper }
+
+class function TOpenMasterdataAPI_RawMaterialHelper.RawMaterialFromStr(
+  _Val: String): TOpenMasterdataAPI_RawMaterial;
+begin
+  if SameText(_Val,'AL') then
+    Result := rawMaterial_AL
+  else
+  if SameText(_Val,'PB') then
+    Result := rawMaterial_PB
+  else
+  if SameText(_Val,'CR') then
+    Result := rawMaterial_CR
+  else
+  if SameText(_Val,'AU') then
+    Result := rawMaterial_AU
+  else
+  if SameText(_Val,'CD') then
+    Result := rawMaterial_CD
+  else
+  if SameText(_Val,'CU') then
+    Result := rawMaterial_CU
+  else
+  if SameText(_Val,'MG') then
+    Result := rawMaterial_MG
+  else
+  if SameText(_Val,'MS') then
+    Result := rawMaterial_MS
+  else
+  if SameText(_Val,'NI') then
+    Result := rawMaterial_NI
+  else
+  if SameText(_Val,'PL') then
+    Result := rawMaterial_PL
+  else
+  if SameText(_Val,'AG') then
+    Result := rawMaterial_AG
+  else
+  if SameText(_Val,'W') then
+    Result := rawMaterial_W
+  else
+  if SameText(_Val,'ZN') then
+    Result := rawMaterial_ZN
+  else
+  if SameText(_Val,'SN') then
+    Result := rawMaterial_SN
+  else
+    Result := rawMaterial_Unknown;
+end;
+
+class function TOpenMasterdataAPI_RawMaterialHelper.RawMaterialToStr(
+  _Val: TOpenMasterdataAPI_RawMaterial): String;
+begin
+  case _Val of
+    rawMaterial_AL: Result := 'AL';
+    rawMaterial_PB: Result := 'PB';
+    rawMaterial_CR: Result := 'CR';
+    rawMaterial_AU: Result := 'AU';
+    rawMaterial_CD: Result := 'CD';
+    rawMaterial_CU: Result := 'CU';
+    rawMaterial_MG: Result := 'MG';
+    rawMaterial_MS: Result := 'MS';
+    rawMaterial_NI: Result := 'NI';
+    rawMaterial_PL: Result := 'PL';
+    rawMaterial_AG: Result := 'AG';
+    rawMaterial_W : Result := 'W';
+    rawMaterial_ZN: Result := 'ZN';
+    rawMaterial_SN: Result := 'SN';
+    else Result := '';
+  end;
 end;
 
 end.

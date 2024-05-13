@@ -1,0 +1,249 @@
+{
+    "supplierPid": "S12345",
+    "manufacturerId": "M67890",
+    "manufacturerIdType": "GLN",
+    "manufacturerPid": "MPID12345",
+    "gtin": "01234567890123",
+    "basic": {
+      "productType": "STD",
+      "startOfValidity": "2024-01-01",
+      "productShortDescr": "Hochwertiger Akkubohrer",
+      "priceOnDemand": false,
+      "rrp": {
+        "value": "159.99",
+        "currency": "EUR",
+        "basis": 1,
+        "quantityUnit": "PCE"
+      },
+      "mainCommodityGroupId": "001",
+      "mainCommodityGroupDescr": "Elektrowerkzeuge",
+      "commodityGroupId": "00101",
+      "commodityGroupDescr": "Bohrmaschinen",
+      "noteOfUse": "Nicht in feuchten Umgebungen verwenden",
+      "matchcode": "AKKBOHR01",
+      "serie": "Xpower",
+      "modelNumber": "XP1000"
+    },
+    "additional": {
+      "minOrderQuantity": "1",
+      "minOrderUnit": "PCE",
+      "articleNumberCatalogue": "CAT123456",
+      "alternativeProduct": [
+        {
+          "supplierPid": "S12346",
+          "manufacturerId": "M67891",
+          "manufacturerIdType": "GLN",
+          "manufacturerPid": "MPID12346",
+          "gtin": "01234567890124",
+          "productShortDescr": "Ähnlicher Akkubohrer",
+          "referenceType": "downselling",
+          "imageLink": "https://example.com/product12346.jpg",
+          "thumbnailUrl": "https://example.com/thumb12346.jpg"
+        }
+      ],
+      "followupProduct": [
+        {
+          "supplierPid": "S12349",
+          "manufacturerId": "M67894",
+          "manufacturerIdType": "GLN",
+          "manufacturerPid": "MPID12349",
+          "gtin": "01234567890128",
+          "productShortDescr": "Nachfolger des Akkubohrers",
+          "referenceType": "upselling",
+          "imageLink": "https://example.com/product12349.jpg",
+          "thumbnailUrl": "https://example.com/thumb12349.jpg"
+        }
+      ],
+      "deepLink": "https://example.com/product12345",
+      "expiringProduct": false,
+      "energyEfficiencyClass": "A",
+      "commodityGroupIdManufacturer": "002",
+      "commodityGroupDescrManufacturer": "Handwerkzeuge",
+      "productGroupIdManufacturer": "00201",
+      "productGroupDescrManufacturer": "Elektrische Handwerkzeuge",
+      "discoundGroupIdManufacturer": "10",
+      "discountGroupDescrManufacturer": "Standardrabatt",
+      "bonusGroupIdManufacturer": "B01",
+      "bonusGroupDescrManufacturer": "Bonus für große Bestellungen",
+      "accessories": [
+        {
+          "supplierPid": "S12347",
+          "manufacturerId": "M67892",
+          "manufacturerIdType": "GLN",
+          "manufacturerPid": "MPID12347",
+          "gtin": "01234567890125",
+          "productShortDescr": "Zusatzakku für Akkubohrer",
+          "necessaryForFunction": false,
+          "referenceType": "complementary",
+          "amount": "1"
+        }
+      ],
+      "sets": [
+        {
+          "supplierPid": "S12350",
+          "manufacturerId": "M67895",
+          "manufacturerIdType": "GLN",
+          "manufacturerPid": "MPID12350",
+          "gtin": "01234567890129",
+          "productShortDescr": "Akkubohrer-Set mit Bit-Satz",
+          "imageLink": "https://example.com/product12350.jpg",
+          "thumbnailUrl": "https://example.com/thumb12350.jpg",
+          "amount": "1",
+          "referenceType": "complementary"
+        }
+      ]
+    },
+    "prices": {
+      "listPrice": {
+        "value": "200.00",
+        "currency": "EUR",
+        "basis": 1,
+        "quantityUnit": "PCE"
+      },
+      "rrp": {
+        "value": "180.00",
+        "currency": "EUR",
+        "basis": 10,
+        "quantityUnit": "PCE"
+      },
+      "netPrice": {
+        "value": "150.00",
+        "currency": "EUR",
+        "basis": 100,
+        "quantityUnit": "PCE"
+      },
+      "taxCode": 1,
+      "rawMaterial": [
+        {
+          "material": "CU",
+          "weightBasis": "5.000",
+          "basisUnit": "KGM",
+          "proportionByWeight": "80.000",
+          "proportionUnit": "GRM",
+          "quotationOfRawMaterial": "6500.00"
+        },
+        {
+          "material": "AL",
+          "weightBasis": "2.500",
+          "basisUnit": "KGM",
+          "proportionByWeight": "20.000",
+          "proportionUnit": "percent",
+          "quotationOfRawMaterial": "2200.00"
+        }
+      ]
+    },
+    "descriptions": {
+      "shorttext1": "Kompakter Akkubohrer",
+      "shorttext2": "Leistungsstark und langlebig",
+      "productDescr": "Dieser Akkubohrer bietet dank seines robusten Designs eine hervorragende Leistung und Langlebigkeit. Ideal für alle Heim- und Profiprojekte.",
+      "marketingText": "Entdecken Sie die ultimative Leistung und Präzision mit unserem neuen Akkubohrer, der für seine Langlebigkeit und Zuverlässigkeit entwickelt wurde."
+    },
+    "logistics": {
+      "exportable": true,
+      "commodityNumber": 12345678,
+      "countryOfOrigin": "DE",
+      "hazardousMaterial": false,
+      "unNumber": "UN1234",
+      "dangerClass": "3",
+      "carryingCategory": 2,
+      "reachInfo": "true",
+      "reachDate": "2023-12-01",
+      "ubaListRelevant": true,
+      "ubaListConform": true,
+      "durabilityPeriod": 36,
+      "standardDeliveryPeriod": 5,
+      "lucidNumber": "LUCID2024",
+      "packagingDisposalProvider": "RecyclePlus",
+      "weeeNumber": "WEEE987654",
+      "measureA": {
+        "measure": "200",
+        "unit": "MMT"
+      },
+      "measureB": {
+        "measure": "50",
+        "unit": "MMT"
+      },
+      "measureC": {
+        "measure": "50",
+        "unit": "MMT"
+      },
+      "weight": {
+        "weight": "1.5",
+        "unit": "KGM"
+      },
+      "packagingQuantity": 10,
+      "packagingUnits": [
+        {
+          "packagingType": "CT",
+          "quantity": "1",
+          "gtin": "01234567890126",
+          "measureA": {
+            "measure": "210",
+            "unit": "MMT"
+          },
+          "measureB": {
+            "measure": "60",
+            "unit": "MMT"
+          },
+          "measureC": {
+            "measure": "60",
+            "unit": "MMT"
+          },
+          "weight": {
+            "weight": "1.6",
+            "unit": "KGM"
+          }
+        }
+      ]
+    },
+    "sparepartlists": {
+      "listNumber": "SP12345",
+      "sparepartlistRow": [
+        {
+          "textRow": {
+            "position": "001",
+            "text": "Hauptkomponente"
+          },
+          "articleRow": {
+            "position": "002",
+            "pricegroup": "PG1",
+            "text": "Schraube",
+            "linkedProduct": {
+              "supplierPid": "S12348",
+              "manufacturerId": "M67893",
+              "manufacturerIdType": "GLN",
+              "manufacturerPid": "MPID12348",
+              "gtin": "01234567890127",
+              "productShortDescr": "Ersatzschraube",
+              "imageLink": "https://example.com/product12348.jpg"
+            }
+          }
+        }
+      ]
+    },
+    "pictures": [
+      {
+        "url": "https://example.com/product12345_main.jpg",
+        "type": "B_",
+        "use": "Web",
+        "substituteId": false,
+        "description": "Hauptbild des Produkts",
+        "sortOrder": 1,
+        "size": 204800,
+        "filename": "product12345_main.jpg",
+        "hash": "abcd1234efgh5678ijkl9012"
+      }
+    ],
+    "documents": [
+      {
+        "url": "https://example.com/manual12345.pdf",
+        "type": "MA",
+        "size": 102400,
+        "filename": "manual12345.pdf",
+        "hash": "1234abcd5678efgh9012ijkl",
+        "description": "Bedienungsanleitung",
+        "sortOrder": 1
+      }
+    ]
+  }
+  

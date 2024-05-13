@@ -75,7 +75,10 @@ begin
   else
     basePath := ExtractFilePath(Application.ExeName);
 
-  configurationFilename := basePath + 'configuration.ini';
+  basePath := ExcludeTrailingPathDelimiter(basePath);
+  basePath := ExtractFilePath(basePath);
+
+  configurationFilename := basePath + 'Samples\configuration.ini';
 
   Configuration := TMemIniFile.Create(configurationFilename,TEncoding.UTF8);
 
@@ -126,10 +129,12 @@ begin
 
   var _Result : TOpenMasterdataAPI_Result;
 
-  _Result := TOpenMasterdataAPI_Result.Create;
+  if FileExists(basePath+'Documentation\OpenMasterdata 1.1.0\sample.json') then
+  begin
+    _Result := TOpenMasterdataAPI_Result.Create;
     try
     try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Wiedemann.json'));
+      _Result.LoadFromJson(TFile.ReadAllText(basePath+'Documentation\OpenMasterdata 1.1.0\sample.json'));
     except
       on E:Exception do
       begin
@@ -140,76 +145,7 @@ begin
     finally
       _Result.Free;
     end;
-  _Result := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_WiedemannRaw.json'));
-    except
-      on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      _Result.Free;
-    end;
-  _Result := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Mosecker.json'));
-    except
-      on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      _Result.Free;
-    end;
-  _Result := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Mainmetall.json'));
-    except
-      on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      _Result.Free;
-    end;
-  _Result := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_GC.json'));
-    except
-      on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      _Result.Free;
-    end;
-  _Result := TOpenMasterdataAPI_Result.Create;
-    try
-    try
-      _Result.LoadFromJson(TFile.ReadAllText(basePath+'supplierPid_Buderus.json'));
-    except
-      on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
-    finally
-      _Result.Free;
-    end;
+  end;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);

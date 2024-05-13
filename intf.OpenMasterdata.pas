@@ -30,8 +30,8 @@ uses
   System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
   ,System.NetEncoding
-  ,Vcl.StdCtrls,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client,
-  intf.OpenMasterdata.Types
+  ,Vcl.StdCtrls,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
+  ,intf.OpenMasterdata.Types
   ;
 
 type
@@ -121,7 +121,8 @@ begin
     openConnections := TInterfaceList.Create;
 
   for i := 0 to openConnections.Count-1 do
-  if SameText(_ConnectionName,IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+  if SameText(_ConnectionName,
+            IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
   begin
     _Connection := IOpenMasterdataApiClient(openConnections[i]);
     Result := true;
@@ -131,7 +132,8 @@ end;
 
 class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   _ConnectionName, _Username, _Password, _CustomerNumber, _ClientID,
-  _ClientSecret,_ClientScope: String; _GrantType : TGrantType): IOpenMasterdataApiClient;
+  _ClientSecret,_ClientScope: String;
+  _GrantType : TGrantType): IOpenMasterdataApiClient;
 begin
   if openConnections = nil then
     openConnections := TInterfaceList.Create;
@@ -140,7 +142,7 @@ begin
     exit;
 
   Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-                  _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
+               _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
   openConnections.Add(Result);
 end;
 
