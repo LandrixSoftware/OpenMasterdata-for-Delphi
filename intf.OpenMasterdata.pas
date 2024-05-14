@@ -29,7 +29,7 @@ interface
 uses
   System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
-  ,System.NetEncoding
+  ,System.NetEncoding,System.Net.HttpClient,System.Net.URLClient
   ,Vcl.StdCtrls,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
   ,intf.OpenMasterdata.Types
   ;
@@ -43,6 +43,8 @@ type
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
 
+    function GetData(_Url : String; out _Result : TStream) : Boolean;
+
     function GetConnectionName : String;
     function GetCurrentAuthorizationToken : String;
     function GetLastOAuthResponseContent : String;
@@ -54,6 +56,12 @@ type
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
   public type
     TGrantType = (omdgt_Password,omdgt_ClientCredentials);
+  public type
+    TValidateCertificatHelper = class(TObject)
+      procedure DoValidateCertificateEvent(const Sender: TObject;
+                   const ARequest: TURLRequest; const Certificate: TCertificate;
+                   var Accepted: Boolean);
+    end;
   private
     FCS : TCriticalSection;
     FUsername,
@@ -96,6 +104,8 @@ type
     procedure SetBySupplierPIDURL(const _URL : String);
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+  public
+    function GetData(_Url : String; out _Result : TStream) : Boolean;
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
     class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType) : IOpenMasterdataApiClient;
@@ -472,6 +482,59 @@ begin
   Result := FAccessToken;
 end;
 
+function TOpenMasterdataApiClient.GetData(_Url: String;
+  out _Result: TStream): Boolean;
+var
+  lHttp : THTTPClient;
+  lVCHelper : TOpenMasterdataApiClient.TValidateCertificatHelper;
+  lData : TMemoryStream;
+  lHeaders : TNetHeaders;
+begin
+  Result := false;
+
+  if _Url.IsEmpty then
+    exit;
+
+  FCS.Acquire;
+  try
+
+  if not LoggedIn then
+    exit;
+
+  FLastErrorMessage := '';
+  FLastErrorCode := 0;
+
+  lHttp := THTTPClient.Create;
+  lData := TMemoryStream.Create;
+  lVCHelper := TOpenMasterdataApiClient.TValidateCertificatHelper.Create;
+  try
+    lHttp.OnValidateServerCertificate := lVCHelper.DoValidateCertificateEvent;
+    try
+      lHeaders := [TNetHeader.Create('Authorization','Bearer ' + FAccessToken)];
+      with lHttp.Get(_URL,lData,lHeaders) do
+      begin
+        Result := StatusCode = 200;
+        if not Result then
+          lData.Free
+        else
+          _Result := lData;
+      end;
+    except
+      on E:Exception do
+      begin
+        FLastErrorMessage := E.ClassName+' '+e.Message;
+      end;
+    end;
+  finally
+    lVCHelper.Free;
+    lHttp.Free;
+  end;
+
+  finally
+    FCS.Release;
+  end;
+end;
+
 class function TOpenMasterdataApiClient.GetGrantTypeFromString(
   const _Val: String; _Default: TGrantType): TGrantType;
 begin
@@ -497,6 +560,15 @@ end;
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
 begin
   FRESTClientOAuth.BaseURL := _URL;
+end;
+
+{ TOpenMasterdataApiClient.TValidateCertificatHelper }
+
+procedure TOpenMasterdataApiClient.TValidateCertificatHelper.DoValidateCertificateEvent(
+  const Sender: TObject; const ARequest: TURLRequest;
+  const Certificate: TCertificate; var Accepted: Boolean);
+begin
+  Accepted := true;
 end;
 
 initialization

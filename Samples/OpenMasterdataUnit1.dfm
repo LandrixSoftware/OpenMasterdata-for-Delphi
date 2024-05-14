@@ -92,10 +92,10 @@ object MainForm: TMainForm
     TabOrder = 4
   end
   object EdgeBrowser1: TEdgeBrowser
-    Left = 480
+    Left = 487
     Top = 224
     Width = 287
-    Height = 287
+    Height = 161
     Anchors = [akLeft, akTop, akRight, akBottom]
     TabOrder = 5
     AllowSingleSignOnUsingOSPrimaryAccount = False
@@ -110,5 +110,24 @@ object MainForm: TMainForm
     Height = 143
     ItemHeight = 15
     TabOrder = 6
+  end
+  object ListBox2: TListBox
+    Left = 487
+    Top = 400
+    Width = 287
+    Height = 111
+    Anchors = [akLeft, akRight, akBottom]
+    ItemHeight = 15
+    TabOrder = 7
+  end
+  object Button1: TButton
+    Left = 487
+    Top = 517
+    Width = 75
+    Height = 25
+    Anchors = [akLeft, akBottom]
+    Caption = 'Download'
+    TabOrder = 8
+    OnClick = Button1Click
   end
 end

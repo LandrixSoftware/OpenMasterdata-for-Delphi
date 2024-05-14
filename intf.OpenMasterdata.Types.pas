@@ -107,62 +107,20 @@ type
   TOpenMasterdataAPI_DocumentList = class(TObjectList<TOpenMasterdataAPI_Document>)
   end;
 
-  TOpenMasterdataAPI_Accessory = class
-  private
-    FproductShortDescr: String;
-    FnecessaryForFunction: Boolean;
-    FmanufacturerPid: String;
-    Fgtin: String;
-    FmanufacturerId: String;
-    FimageLink: String;
-    FsupplierPid: String;
-  public
-    property supplierPid : String read FsupplierPid write FsupplierPid;
-    property manufacturerId : String read FmanufacturerId write FmanufacturerId;
-    property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid;
-    property gtin : String read Fgtin write Fgtin;
-    property productShortDescr : String read FproductShortDescr write FproductShortDescr;
-    property imageLink : String read FimageLink write FimageLink;
-    property necessaryForFunction : Boolean read FnecessaryForFunction write FnecessaryForFunction;
-  end;
-
-  TOpenMasterdataAPI_AccessoryList = class(TObjectList<TOpenMasterdataAPI_Accessory>)
-  end;
-
-  TOpenMasterdataAPI_Set = class
-  private
-    FproductShortDescr: String;
-    FmanufacturerPid: String;
-    Fgtin: String;
-    Famount: double;
-    FmanufacturerId: String;
-    FimageLink: String;
-    FsupplierPid: String;
-  public
-    property supplierPid : String read FsupplierPid write FsupplierPid;
-    property manufacturerId : String read FmanufacturerId write FmanufacturerId;
-    property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid;
-    property gtin : String read Fgtin write Fgtin;
-    property productShortDescr : String read FproductShortDescr write FproductShortDescr;
-    property imageLink : String read FimageLink write FimageLink;
-    property amount : double read Famount write Famount;
-  end;
-
-  TOpenMasterdataAPI_SetList = class(TObjectList<TOpenMasterdataAPI_Set>)
-  end;
-
   TOpenMasterdataAPI_LinkedProduct = class(TObject)
   private
     FproductShortDescr: String;
     FmanufacturerPid: String;
     Fgtin: String;
     FmanufacturerId: String;
+    FmanufacturerIdType: String;
     FimageLink: String;
     FthumbnailUrl: String;
     FsupplierPid: String;
   public
     property supplierPid : String read FsupplierPid write FsupplierPid;
     property manufacturerId : String read FmanufacturerId write FmanufacturerId;
+    property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType;
     property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid;
     property gtin : String read Fgtin write Fgtin;
     property productShortDescr : String read FproductShortDescr write FproductShortDescr;
@@ -170,12 +128,92 @@ type
     property thumbnailUrl : String read FthumbnailUrl write FthumbnailUrl;
   end;
 
-  TOpenMasterdataAPI_LinkedProductList = class(TObjectList<TOpenMasterdataAPI_LinkedProduct>)
+  TOpenMasterdataAPI_LinkedHistoricProduct = class(TObject)
+  private
+    FhistoricProduct: String;
+    FproductShortDescr: String;
+    FmanufacturerIdType: String;
+    FconstructionFrom: String;
+    FimageLink: String;
+  public
+    property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType;
+    property historicProduct : String read FhistoricProduct write FhistoricProduct;
+    property constructionFrom : String read FconstructionFrom write FconstructionFrom;
+    property productShortDescr : String read FproductShortDescr write FproductShortDescr;
+    property imageLink : String read FimageLink write FimageLink;
+  end;
+
+  TOpenMasterdataAPI_Accessory = class(TOpenMasterdataAPI_LinkedProduct)
+  private
+    FnecessaryForFunction: Boolean;
+    FreferenceType: String;
+    Famount: double;
+  public
+    property amount : double read Famount write Famount;
+    property referenceType : String read FreferenceType write FreferenceType;
+    property necessaryForFunction : Boolean read FnecessaryForFunction write FnecessaryForFunction;
+  end;
+
+  TOpenMasterdataAPI_AccessoryList = class(TObjectList<TOpenMasterdataAPI_Accessory>)
+  end;
+
+  TOpenMasterdataAPI_Set = class(TOpenMasterdataAPI_LinkedProduct)
+  private
+    Famount: double;
+  public
+    property amount : double read Famount write Famount;
+  end;
+
+  TOpenMasterdataAPI_SetList = class(TObjectList<TOpenMasterdataAPI_Set>)
+  end;
+
+  TOpenMasterdataAPI_AlternativeProduct = class(TOpenMasterdataAPI_LinkedProduct)
+  private
+    FreferenceType: String;
+  public
+    property referenceType : String read FreferenceType write FreferenceType;
+  end;
+
+  TOpenMasterdataAPI_AlternativeProductList = class(TObjectList<TOpenMasterdataAPI_AlternativeProduct>)
+  end;
+
+  TOpenMasterdataAPI_FollowupProduct = class(TOpenMasterdataAPI_LinkedProduct)
+  private
+    FreferenceType: String;
+  public
+    property referenceType : String read FreferenceType write FreferenceType;
+  end;
+
+  TOpenMasterdataAPI_FollowupProductList = class(TObjectList<TOpenMasterdataAPI_FollowupProduct>)
+  end;
+
+  TOpenMasterdataAPI_Attribute = class
+  private
+    FattributeSystem: String;
+    FattributeUnitDesc: String;
+    FattributeDesc: String;
+    FattributeUnit: String;
+    FattributeName: String;
+    FattributeValue1Descr: String;
+    FattributeClassDesc: String;
+    FattributeValue1: String;
+  public
+    property attributeSystem : String read FattributeSystem write FattributeSystem;
+    property attributeName : String read FattributeName write FattributeName;
+    property attributeValue1 : String read FattributeValue1 write FattributeValue1;
+    property attributeUnit : String read FattributeUnit write FattributeUnit;
+    property attributeClassDesc : String read FattributeClassDesc write FattributeClassDesc;
+    property attributeDesc : String read FattributeDesc write FattributeDesc;
+    property attributeValue1Descr : String read FattributeValue1Descr write FattributeValue1Descr;
+    property attributeUnitDesc : String read FattributeUnitDesc write FattributeUnitDesc;
+  end;
+
+  TOpenMasterdataAPI_AttributeList = class(TObjectList<TOpenMasterdataAPI_Attribute>)
   end;
 
   TOpenMasterdataAPI_Additional = class
   private
-    FexpiringProduct: String;
+    FexpiringProduct: Boolean;
     FminOrderQuantity: double;
     FdeepLink: String;
     FminOrderUnit: String;
@@ -183,8 +221,21 @@ type
     Faccessories: TOpenMasterdataAPI_AccessoryList;
     FexpiringDate: TDate;
     FarticleNumberCatalogue: String;
-    FalternativeProduct: TOpenMasterdataAPI_LinkedProductList;
-    FfollowupProduct: TOpenMasterdataAPI_LinkedProductList;
+    FalternativeProduct: TOpenMasterdataAPI_AlternativeProductList;
+    FfollowupProduct: TOpenMasterdataAPI_FollowupProductList;
+    FconstructionText: String;
+    FdiscountGroupDescrManufacturer: String;
+    FconstructionTo: String;
+    FcommodityGroupIdManufacturer: String;
+    Fattribute: TOpenMasterdataAPI_AttributeList;
+    FcommodityGroupDescrManufacturer: String;
+    FconstructionFrom: String;
+    FdiscoundGroupIdManufacturer: String;
+    FbonusGroupIdManufacturer: String;
+    FproductGroupIdManufacturer: String;
+    FenergyEfficiencyClass: String;
+    FbonusGroupDescrManufacturer: String;
+    FproductGroupDescrManufacturer: String;
   public
     constructor Create;
     destructor Destroy; override;
@@ -192,90 +243,26 @@ type
     property minOrderQuantity : double read FminOrderQuantity write FminOrderQuantity; //Mindestbestellmenge
     property minOrderUnit : String read FminOrderUnit write FminOrderUnit; //Units (Mengeneinheiten) -- Code Beschreibung\n- CMK = Quadratzentimeter\n- CMQ = Kubikzentimeter\n- CMT = Zentimeter\n- DZN = Dutzend\n- GRM = Gramm\n- HLT = Hektoliter\n- KGM = Kilogramm\n- KTM = Kilometer\n- LTR = Liter\n- MMT = Millimeter\n- MTK = Quadratmeter\n- MTQ = Kubikmeter\n- MTR = Meter\n- PCE = Stück\n- PR = Paar\n- SET = Satz\n- TNE = Tonne
     property articleNumberCatalogue : String read FarticleNumberCatalogue write FarticleNumberCatalogue; //max 15 Werksartikelnummer Katalog
-    property alternativeProduct : TOpenMasterdataAPI_LinkedProductList read FalternativeProduct write FalternativeProduct;
-    property followupProduct : TOpenMasterdataAPI_LinkedProductList read FfollowupProduct write FfollowupProduct;
+    property alternativeProduct : TOpenMasterdataAPI_AlternativeProductList read FalternativeProduct write FalternativeProduct;
+    property followupProduct : TOpenMasterdataAPI_FollowupProductList read FfollowupProduct write FfollowupProduct;
     property deepLink : String read FdeepLink write FdeepLink; //max 256 Deeplink zum Artikel
-    property expiringProduct : String read FexpiringProduct write FexpiringProduct; //enum" : [ true, "Yes-Successor", false ] Auslaufartikel\n  - Yes = Artikel ist Auslauf\n  - Yes-Successor = Artikel ist Auslauf und Nachfolgeartikel existiert\n  - No = Artikel ist nicht Auslauf
+    property expiringProduct : Boolean read FexpiringProduct write FexpiringProduct; //enum" : [ true, "Yes-Successor", false ] Auslaufartikel\n  - Yes = Artikel ist Auslauf\n  - Yes-Successor = Artikel ist Auslauf und Nachfolgeartikel existiert\n  - No = Artikel ist nicht Auslauf
     property expiringDate : TDate read FexpiringDate write FexpiringDate; //Auslaufdatum
+    property energyEfficiencyClass : String read FenergyEfficiencyClass write FenergyEfficiencyClass;
+    property commodityGroupIdManufacturer : String read FcommodityGroupIdManufacturer write FcommodityGroupIdManufacturer;
+    property commodityGroupDescrManufacturer : String read FcommodityGroupDescrManufacturer write FcommodityGroupDescrManufacturer;
+    property productGroupIdManufacturer : String read FproductGroupIdManufacturer write FproductGroupIdManufacturer;
+    property productGroupDescrManufacturer : String read FproductGroupDescrManufacturer write FproductGroupDescrManufacturer;
+    property discoundGroupIdManufacturer : String read FdiscoundGroupIdManufacturer write FdiscoundGroupIdManufacturer;
+    property discountGroupDescrManufacturer : String read FdiscountGroupDescrManufacturer write FdiscountGroupDescrManufacturer;
+    property bonusGroupIdManufacturer : String read FbonusGroupIdManufacturer write FbonusGroupIdManufacturer;
+    property bonusGroupDescrManufacturer : String read FbonusGroupDescrManufacturer write FbonusGroupDescrManufacturer;
     property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories write Faccessories;
     property sets : TOpenMasterdataAPI_SetList read Fsets write Fsets;
-//            "energyEfficiencyClass" : {
-//              "$ref" : "#/components/schemas/EnergyEfficiencyClass"
-//            },
-//            "commodityGroupIdManufacturer" : {
-//              "type" : "string",
-//              "description" : "Warengruppen ID des Herstellers",
-//              "maxLength" : 3
-//            },
-//            "commodityGroupDescrManufacturer" : {
-//              "type" : "string",
-//              "description" : "Warengruppen Bezeichnung des Herstellers",
-//              "maxLength" : 40
-//            },
-//            "productGroupIdManufacturer" : {
-//              "type" : "string",
-//              "description" : "Produktgrupppen ID",
-//              "maxLength" : 10
-//            },
-//            "productGroupDescrManufacturer" : {
-//              "type" : "string",
-//              "description" : "Produktgruppen Bezeichnung",
-//              "maxLength" : 40
-//            },
-//            "discoundGroupIdManufacturer" : {
-//              "type" : "string",
-//              "description" : "Rabattgruppen ID",
-//              "maxLength" : 4
-//            },
-//            "discountGroupDescrManufacturer" : {
-//              "type" : "string",
-//              "description" : "Rabattgruppen Bezeichnung",
-//              "maxLength" : 40
-//            },
-//            "bonusGroupIdManufacturer" : {
-//              "type" : "string",
-//              "description" : "Bonusgruppen ID",
-//              "maxLength" : 35
-//            },
-//            "bonusGroupDescrManufacturer" : {
-//              "type" : "string",
-//              "description" : "Bonusgruppen Bezeichnung",
-//              "maxLength" : 40
-//            },
-//            "accessories" : {
-//              "type" : "array",
-//              "description" : "Liste von Zubehörartikeln",
-//              "items" : {
-//                "$ref" : "#/components/schemas/AccessoriesProduct"
-//              }
-//            },
-//            "sets" : {
-//              "type" : "array",
-//              "description" : "Artikelsets",
-//              "items" : {
-//                "$ref" : "#/components/schemas/SetsProduct"
-//              }
-//            },
-//            "attribute" : {
-//              "type" : "array",
-//              "description" : "Liste von Artikelattributen",
-//              "items" : {
-//                "$ref" : "#/components/schemas/ProductAttribute"
-//              }
-//            },
-//            "constructionFrom" : {
-//              "$ref" : "#/components/schemas/ConstructionFrom"
-//            },
-//            "constructionTo" : {
-//              "type" : "string",
-//              "format" : "date",
-//              "description" : "Baujahr bis"
-//            },
-//            "constructionText" : {
-//              "type" : "string",
-//              "description" : "Baujahr Text",
-//              "maxLength" : 35
-//            }
+    property attribute : TOpenMasterdataAPI_AttributeList read Fattribute write Fattribute;
+    property constructionFrom : String read FconstructionFrom write FconstructionFrom;
+    property constructionTo : String read FconstructionTo write FconstructionTo;
+    property constructionText : String read FconstructionText write FconstructionText;
   end;
 
   TOpenMasterdataAPI_LogisticsMeasure = class
@@ -416,6 +403,60 @@ type
     property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
     property packagingQuantity : Integer read FpackagingQuantity write FpackagingQuantity;
     property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits write FpackagingUnits;
+  end;
+
+  TOpenMasterdataAPI_TextRow = class
+  private
+    Ftext: String;
+    Fposition: String;
+  public
+    property position : String read Fposition write Fposition;
+    property text : String read Ftext write Ftext;
+  end;
+
+  TOpenMasterdataAPI_ArticleRow = class
+  private
+    FlinkedHistoricProduct: TOpenMasterdataAPI_LinkedHistoricProduct;
+    Fpricegroup: String;
+    FlinkedProduct: TOpenMasterdataAPI_LinkedProduct;
+    Ftext: String;
+    Fposition: String;
+  public
+    property position : String read Fposition write Fposition;
+    property pricegroup : String read Fpricegroup write Fpricegroup;
+    property text : String read Ftext write Ftext;
+    property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct write FlinkedProduct;
+    property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct write FlinkedHistoricProduct;
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  TOpenMasterdataAPI_SparepartlistRow = class
+  private
+    FtextRow: TOpenMasterdataAPI_TextRow;
+    FarticleRow: TOpenMasterdataAPI_ArticleRow;
+  public
+    property textRow : TOpenMasterdataAPI_TextRow read FtextRow write FtextRow;
+    property articleRow : TOpenMasterdataAPI_ArticleRow read FarticleRow write FarticleRow;
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  TOpenMasterdataAPI_SparepartlistRowList = class(TObjectList<TOpenMasterdataAPI_SparepartlistRow>)
+  end;
+
+  TOpenMasterdataAPI_Sparepartlist = class
+  private
+    FlistNumber : String;
+    FsparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList;
+  public
+    property listNumber : String read FlistNumber write FlistNumber;
+    property sparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList read FsparepartlistRow write FsparepartlistRow;
+  public
+    constructor Create;
+    destructor Destroy; override;
   end;
 
   TOpenMasterdataAPI_Price = class
@@ -575,10 +616,6 @@ type
   TOpenMasterdataAPI_PictureList = class(TObjectList<TOpenMasterdataAPI_Picture>)
   end;
 
-  TOpenMasterdataAPI_Sparepartlist = class
-    //TODO
-  end;
-
   TOpenMasterdataAPI_Result = class
   private
     Fprices: TOpenMasterdataAPI_Prices;
@@ -593,7 +630,7 @@ type
     FmanufacturerId: String;
     FmanufacturerIdType: String;
     Fgtin: String;
-    Fsparepartlists: TOpenMasterdataAPI_Sparepartlist;
+    Fsparepartlist: TOpenMasterdataAPI_Sparepartlist;
   public
     constructor Create;
     destructor Destroy; override;
@@ -609,7 +646,7 @@ type
     property prices : TOpenMasterdataAPI_Prices read Fprices write Fprices;
     property descriptions : TOpenMasterdataAPI_Descriptions read Fdescriptions write Fdescriptions;
     property pictures : TOpenMasterdataAPI_PictureList read Fpictures write Fpictures;
-    property sparepartlists : TOpenMasterdataAPI_Sparepartlist read Fsparepartlists write Fsparepartlists;
+    property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist write Fsparepartlist;
     property documents : TOpenMasterdataAPI_DocumentList read Fdocuments write Fdocuments;
   end;
 
@@ -707,10 +744,11 @@ end;
 
 constructor TOpenMasterdataAPI_Additional.Create;
 begin
-  FalternativeProduct := TOpenMasterdataAPI_LinkedProductList.Create;
-  FfollowupProduct := TOpenMasterdataAPI_LinkedProductList.Create;
+  FalternativeProduct := TOpenMasterdataAPI_AlternativeProductList.Create;
+  FfollowupProduct := TOpenMasterdataAPI_FollowupProductList.Create;
   Faccessories := TOpenMasterdataAPI_AccessoryList.Create;
   Fsets := TOpenMasterdataAPI_SetList.Create;
+  Fattribute := TOpenMasterdataAPI_AttributeList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Additional.Destroy;
@@ -719,6 +757,7 @@ begin
   if Assigned(FfollowupProduct) then begin FfollowupProduct.Free; FfollowupProduct := nil; end;
   if Assigned(Faccessories) then begin Faccessories.Free; Faccessories := nil; end;
   if Assigned(Fsets) then begin Fsets.Free; Fsets := nil; end;
+  if Assigned(Fattribute) then begin Fattribute.Free; Fattribute := nil; end;
   inherited;
 end;
 
@@ -754,7 +793,7 @@ begin
   Fprices := TOpenMasterdataAPI_Prices.Create;
   Fdescriptions := TOpenMasterdataAPI_Descriptions.Create;
   Fpictures := TOpenMasterdataAPI_PictureList.Create;
-  sparepartlists := TOpenMasterdataAPI_Sparepartlist.Create;
+  Fsparepartlist := TOpenMasterdataAPI_Sparepartlist.Create;
 end;
 
 destructor TOpenMasterdataAPI_Result.Destroy;
@@ -766,7 +805,7 @@ begin
   if Assigned(Fprices) then begin Fprices.Free; Fprices := nil; end;
   if Assigned(Fdescriptions) then begin Fdescriptions.Free; Fdescriptions := nil; end;
   if Assigned(Fpictures) then begin Fpictures.Free; Fpictures := nil; end;
-  if Assigned(sparepartlists) then begin sparepartlists.Free; sparepartlists := nil; end;
+  if Assigned(Fsparepartlist) then begin Fsparepartlist.Free; Fsparepartlist := nil; end;
   inherited;
 end;
 
@@ -935,13 +974,15 @@ begin
       if jsonValue.TryGetValue<TJSONArray>('alternativeProduct',jsonArray) then
       for jsonValue2 in jsonArray do
       begin
-        var itemAlternativeProduct : TOpenMasterdataAPI_LinkedProduct := TOpenMasterdataAPI_LinkedProduct.Create;
+        var itemAlternativeProduct : TOpenMasterdataAPI_AlternativeProduct := TOpenMasterdataAPI_AlternativeProduct.Create;
         additional.alternativeProduct.Add(itemAlternativeProduct);
 
         if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
           itemAlternativeProduct.supplierPid := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
           itemAlternativeProduct.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
+          itemAlternativeProduct.manufacturerIdType := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
           itemAlternativeProduct.manufacturerPid := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
@@ -952,17 +993,21 @@ begin
           itemAlternativeProduct.imageLink := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
           itemAlternativeProduct.thumbnailUrl := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('referenceType',jsonString) then
+          itemAlternativeProduct.referenceType := jsonString.Value;
       end;
       if jsonValue.TryGetValue<TJSONArray>('followupProduct',jsonArray) then
       for jsonValue2 in jsonArray do
       begin
-        var itemFollowupProduct : TOpenMasterdataAPI_LinkedProduct := TOpenMasterdataAPI_LinkedProduct.Create;
+        var itemFollowupProduct : TOpenMasterdataAPI_FollowupProduct := TOpenMasterdataAPI_FollowupProduct.Create;
         additional.followupProduct.Add(itemFollowupProduct);
 
         if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
           itemFollowupProduct.supplierPid := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
           itemFollowupProduct.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
+          itemFollowupProduct.manufacturerIdType := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
           itemFollowupProduct.manufacturerPid := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
@@ -973,26 +1018,117 @@ begin
           itemFollowupProduct.imageLink := jsonString.Value;
         if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
           itemFollowupProduct.thumbnailUrl := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('referenceType',jsonString) then
+          itemFollowupProduct.referenceType := jsonString.Value;
       end;
       if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
         additional.deepLink := jsonString.Value;
-//      additional.expiringProduct
-//      additional.expiringDate
-//      additional.accessories
-//      additional.sets
-  //        "expiringProduct": "No",
-  //        "commodityGroupIdManufacturer": "",
-  //        "commodityGroupDescrManufacturer": "",
-  //        "productGroupIdManufacturer": "",
-  //        "productGroupDescrManufacturer": "",
-  //        "discoundGroupIdManufacturer": "",
-  //        "discountGroupDescrManufacturer": "",
-  //        "bonusGroupIdManufacturer": "",
-  //        "bonusGroupDescrManufacturer": "",
-  //        "accessories": [],
-  //        "sets": [],
-  //        "attribute": [],
-  //        "constructionText": ""
+      if jsonValue.TryGetValue<TJSONString>('expiringProduct',jsonString) then
+        additional.expiringProduct := SameText(jsonString.Value,'yes');
+      if jsonValue.TryGetValue<TJSONString>('expiringDate',jsonString) then
+        additional.expiringDate := TOpenMasterdataAPIHelper.JSONStrToDate(jsonString.Value);
+
+      if jsonValue.TryGetValue<TJSONString>('energyEfficiencyClass',jsonString) then
+        additional.energyEfficiencyClass := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('commodityGroupIdManufacturer',jsonString) then
+        additional.commodityGroupIdManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('commodityGroupDescrManufacturer',jsonString) then
+        additional.commodityGroupDescrManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('productGroupIdManufacturer',jsonString) then
+        additional.productGroupIdManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('productGroupDescrManufacturer',jsonString) then
+        additional.productGroupDescrManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('discoundGroupIdManufacturer',jsonString) then
+        additional.discoundGroupIdManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('discountGroupDescrManufacturer',jsonString) then
+        additional.discountGroupDescrManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('bonusGroupIdManufacturer',jsonString) then
+        additional.bonusGroupIdManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('bonusGroupDescrManufacturer',jsonString) then
+        additional.bonusGroupDescrManufacturer := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONArray>('accessories',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemAccessory : TOpenMasterdataAPI_Accessory := TOpenMasterdataAPI_Accessory.Create;
+        additional.accessories.Add(itemAccessory);
+
+        if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
+          itemAccessory.supplierPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
+          itemAccessory.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
+          itemAccessory.manufacturerIdType := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
+          itemAccessory.manufacturerPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+          itemAccessory.gtin := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+          itemAccessory.productShortDescr := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('imageLink',jsonString) then
+          itemAccessory.imageLink := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
+          itemAccessory.thumbnailUrl := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('amount',jsonString) then
+          itemAccessory.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if jsonValue2.TryGetValue<TJSONString>('referenceType',jsonString) then
+          itemAccessory.referenceType := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONBool>('necessaryForFunction',jsonBool) then
+          itemAccessory.necessaryForFunction := jsonBool.AsBoolean;
+      end;
+      if jsonValue.TryGetValue<TJSONArray>('sets',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemSet : TOpenMasterdataAPI_Set := TOpenMasterdataAPI_Set.Create;
+        additional.sets.Add(itemSet);
+
+        if jsonValue2.TryGetValue<TJSONString>('supplierPid',jsonString) then
+          itemSet.supplierPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerId',jsonString) then
+          itemSet.manufacturerId := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerIdType',jsonString) then
+          itemSet.manufacturerIdType := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('manufacturerPid',jsonString) then
+          itemSet.manufacturerPid := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+          itemSet.gtin := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('productShortDescr',jsonString) then
+          itemSet.productShortDescr := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('imageLink',jsonString) then
+          itemSet.imageLink := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('thumbnailUrl',jsonString) then
+          itemSet.thumbnailUrl := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('amount',jsonString) then
+          itemSet.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+      end;
+      if jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemAttribute : TOpenMasterdataAPI_Attribute := TOpenMasterdataAPI_Attribute.Create;
+        additional.attribute.Add(itemAttribute);
+
+        if jsonValue2.TryGetValue<TJSONString>('attributeSystem',jsonString) then
+          itemAttribute.attributeSystem := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeName',jsonString) then
+          itemAttribute.attributeName := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeValue1',jsonString) then
+          itemAttribute.attributeValue1 := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeUnit',jsonString) then
+          itemAttribute.attributeUnit := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeClassDesc',jsonString) then
+          itemAttribute.attributeClassDesc := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeDesc',jsonString) then
+          itemAttribute.attributeDesc := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeValue1Descr',jsonString) then
+          itemAttribute.attributeValue1Descr := jsonString.Value;
+        if jsonValue2.TryGetValue<TJSONString>('attributeUnitDesc',jsonString) then
+          itemAttribute.attributeUnitDesc := jsonString.Value;
+      end;
+      if jsonValue.TryGetValue<TJSONString>('constructionFrom',jsonString) then
+        additional.constructionFrom := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('constructionTo',jsonString) then
+        additional.constructionTo := jsonString.Value;
+      if jsonValue.TryGetValue<TJSONString>('constructionText',jsonString) then
+        additional.constructionText := jsonString.Value;
     end;
     if messageJson.TryGetValue<TJSONValue>('descriptions',jsonValue) then
     begin
@@ -1035,6 +1171,16 @@ begin
         LoadMeasureUnitFromJson(jsonValue2,logistics.measureC);
       if jsonValue.TryGetValue<TJSONValue>('weight',jsonValue2) then
         LoadWeightFromJson(jsonValue2,logistics.weight);
+      if jsonValue.TryGetValue<TJSONValue>('unNumber',jsonValue2) then
+        logistics.unNumber := jsonValue2.Value;
+      if jsonValue.TryGetValue<TJSONValue>('dangerClass',jsonValue2) then
+        logistics.dangerClass := jsonValue2.Value;
+      if jsonValue.TryGetValue<TJSONBool>('ubaListRelevant',jsonBool) then
+        logistics.ubaListRelevant := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONBool>('ubaListConform',jsonBool) then
+        logistics.ubaListConform := jsonBool.AsBoolean;
+      if jsonValue.TryGetValue<TJSONValue>('weeeNumber',jsonValue2) then
+        logistics.weeeNumber := jsonValue2.Value;
       if jsonValue.TryGetValue<TJSONString>('packagingQuantity',jsonString) then
         logistics.packagingQuantity := StrToIntDef(jsonString.Value,0);
       if jsonValue.TryGetValue<TJSONArray>('packagingUnits',jsonArray) then
@@ -1058,12 +1204,21 @@ begin
         if jsonValue2.TryGetValue<TJSONValue>('weight',jsonValue3) then
           LoadWeightFromJson(jsonValue3,itemPackagingUnit.weight);
       end;
-  //        "unNumber": "",
-  //        "dangerClass": "",
-  //        "reachData": "",
-  //        "ubaListRelevant": false,
-  //        "ubaListConform": false,
-  //        "weeeNumber": "",
+    end;
+    if messageJson.TryGetValue<TJSONValue>('sparepartlists',jsonValue) then
+    begin
+      if jsonValue.TryGetValue<TJSONString>('listNumber',jsonString) then
+        sparepartlist.listNumber := jsonString.Value;
+
+//      if jsonValue.TryGetValue<TJSONArray>('sparepartlistRow',jsonArray) then
+//      for jsonValue2 in jsonArray do
+//      begin
+//        var itemSparepartlistRow : TOpenMasterdataAPI_SparepartlistRow := TOpenMasterdataAPI_SparepartlistRow.Create;
+//        sparepartlist.sparepartlistRow.Add(itemSparepartlistRow);
+//        TODO
+//        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
+//          itemPackagingUnit.gtin := jsonString.Value;
+//      end;
     end;
     if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
     for jsonValue in jsonArray do
@@ -1391,6 +1546,49 @@ begin
     rawMaterial_SN: Result := 'SN';
     else Result := '';
   end;
+end;
+
+{ TOpenMasterdataAPI_Sparepartlist }
+
+constructor TOpenMasterdataAPI_Sparepartlist.Create;
+begin
+  FsparepartlistRow := TOpenMasterdataAPI_SparepartlistRowList.Create;
+end;
+
+destructor TOpenMasterdataAPI_Sparepartlist.Destroy;
+begin
+  if Assigned(FsparepartlistRow) then begin FsparepartlistRow.Free; FsparepartlistRow := nil; end;
+  inherited;
+end;
+
+{ TOpenMasterdataAPI_ArticleRow }
+
+constructor TOpenMasterdataAPI_ArticleRow.Create;
+begin
+  FlinkedProduct := TOpenMasterdataAPI_LinkedProduct.Create;
+  FlinkedHistoricProduct := TOpenMasterdataAPI_LinkedHistoricProduct.Create;
+end;
+
+destructor TOpenMasterdataAPI_ArticleRow.Destroy;
+begin
+  if Assigned(FlinkedProduct) then begin FlinkedProduct.Free; FlinkedProduct := nil; end;
+  if Assigned(FlinkedHistoricProduct) then begin FlinkedHistoricProduct.Free; FlinkedHistoricProduct := nil; end;
+  inherited;
+end;
+
+{ TOpenMasterdataAPI_SparepartlistRow }
+
+constructor TOpenMasterdataAPI_SparepartlistRow.Create;
+begin
+  FtextRow := TOpenMasterdataAPI_TextRow.Create;
+  FarticleRow := TOpenMasterdataAPI_ArticleRow.Create;
+end;
+
+destructor TOpenMasterdataAPI_SparepartlistRow.Destroy;
+begin
+  if Assigned(FtextRow) then begin FtextRow.Free; FtextRow := nil; end;
+  if Assigned(FarticleRow) then begin FarticleRow.Free; FarticleRow := nil; end;
+  inherited;
 end;
 
 end.

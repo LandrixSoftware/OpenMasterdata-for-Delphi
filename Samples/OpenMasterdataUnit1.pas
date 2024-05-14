@@ -48,12 +48,15 @@ type
     EdgeBrowser1: TEdgeBrowser;
     Label4: TLabel;
     CheckListBox1: TCheckListBox;
+    ListBox2: TListBox;
+    Button1: TButton;
     procedure btBySupplierPidClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure ComboBox1Select(Sender: TObject);
     procedure EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
       Args: TWebResourceRequestedEventArgs);
+    procedure Button1Click(Sender: TObject);
   public
     Configuration : TMemIniFile;
     CurrentAuthorizationToken : String;
@@ -153,6 +156,51 @@ begin
   if Assigned(Configuration) then begin Configuration.Free; Configuration := nil; end;
 end;
 
+procedure TMainForm.Button1Click(Sender: TObject);
+var
+  client : IOpenMasterdataApiClient;
+  data : TStream;
+begin
+  if ListBox2.ItemIndex < 0 then
+    exit;
+
+  if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
+  begin
+    var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
+
+    client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
+               Configuration.ReadString(ComboBox1.Text,'Username',''),
+               Configuration.ReadString(ComboBox1.Text,'Password',''),
+               Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
+               Configuration.ReadString(ComboBox1.Text,'ClientID',''),
+               Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
+               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
+    client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
+    client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
+  end;
+
+  if client.GetData(ListBox2.Items[ListBox2.ItemIndex],data) then
+  try
+    if data is TMemoryStream then
+    begin
+      var lFilename : String := ListBox2.Items[ListBox2.ItemIndex];
+      if lFilename.EndsWith('.pdf',true) then
+        lFilename := 'test.pdf'
+      else
+      if lFilename.EndsWith('.jpg',true) then
+        lFilename := 'test.jpg'
+      else
+        lFilename := 'test.unknown';
+      TMemoryStream(data).SaveToFile(ExtractFilePath(Application.ExeName)+lFilename);
+    end;
+  finally
+    data.Free;
+  end else
+  begin
+    MessageDlg(client.GetLastErrorMessage, mtError, [mbOK], 0);
+  end;
+end;
+
 procedure TMainForm.ComboBox1Select(Sender: TObject);
 begin
   ListBox1.Items.CommaText := Configuration.ReadString(ComboBox1.Text,'ArtNoAsCommatext','');
@@ -212,6 +260,7 @@ var
   supplierPid : TOpenMasterdataAPI_Result;
   html : String;
   dataPackages : TOpenMasterdataAPI_DataPackages;
+  i : Integer;
 
   function FormatJSON(json: String): String;
   var
@@ -230,6 +279,7 @@ var
 begin
   Memo1.Clear;
   CurrentAuthorizationToken := '';
+  ListBox2.Clear;
 
   if ComboBox1.ItemIndex < 0 then
     exit;
@@ -252,9 +302,9 @@ begin
   end;
 
   dataPackages := [];
-  for var i : TOpenMasterdataAPI_DataPackage := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
-  if CheckListBox1.Checked[Integer(i)] then
-    dataPackages := dataPackages + [i];
+  for var iDataPackage : TOpenMasterdataAPI_DataPackage := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+  if CheckListBox1.Checked[Integer(iDataPackage)] then
+    dataPackages := dataPackages + [iDataPackage];
 
   if client.GetBySupplierPid(ListBox1.Items[ListBox1.ItemIndex],dataPackages,supplierPid) then
   try
@@ -265,6 +315,16 @@ begin
 
     EdgeBrowser1.AddWebResourceRequestedFilter('*', COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
     EdgeBrowser1.NavigateToString(html);
+
+    for i := 0 to supplierPid.pictures.Count-1 do
+    begin
+      ListBox2.Items.Add(supplierPid.pictures[i].url);
+    end;
+    for i := 0 to supplierPid.documents.Count-1 do
+    begin
+      ListBox2.Items.Add(supplierPid.documents[i].url);
+    end;
+
   finally
     supplierPid.Free;
   end else

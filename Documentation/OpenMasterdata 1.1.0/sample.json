@@ -55,7 +55,7 @@
         }
       ],
       "deepLink": "https://example.com/product12345",
-      "expiringProduct": false,
+      "expiringProduct": "No",
       "energyEfficiencyClass": "A",
       "commodityGroupIdManufacturer": "002",
       "commodityGroupDescrManufacturer": "Handwerkzeuge",
@@ -91,7 +91,32 @@
           "amount": "1",
           "referenceType": "complementary"
         }
-      ]
+      ],
+      "attribute": [
+        {
+          "attributeSystem": "ETIM 7",
+          "attributeName": "Spannung",
+          "attributeValue1": "18",
+          "attributeUnit": "V",
+          "attributeClassDesc": "Elektrische Daten",
+          "attributeDesc": "Betriebsspannung",
+          "attributeValue1Descr": "18 Volt",
+          "attributeUnitDesc": "Volt"
+        },
+        {
+          "attributeSystem": "ERP 2.5",
+          "attributeName": "Bohrfutter Typ",
+          "attributeValue1": "Schnellspann",
+          "attributeUnit": "Typ",
+          "attributeClassDesc": "Mechanische Daten",
+          "attributeDesc": "Typ des Bohrfutters",
+          "attributeValue1Descr": "Schnellspannfutter",
+          "attributeUnitDesc": "Typenbezeichnung"
+        }
+      ],
+      "constructionFrom": "2015-01-01",
+      "constructionTo": "2016-01-01",
+      "constructionText": "Dieses Modell wurde von 2015 bis 2016 produziert."
     },
     "prices": {
       "listPrice": {
