@@ -135,7 +135,9 @@ type
     FmanufacturerIdType: String;
     FconstructionFrom: String;
     FimageLink: String;
+    FmanufacturerId: String;
   public
+    property manufacturerId : String read FmanufacturerId write FmanufacturerId;
     property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType;
     property historicProduct : String read FhistoricProduct write FhistoricProduct;
     property constructionFrom : String read FconstructionFrom write FconstructionFrom;
@@ -422,8 +424,17 @@ type
     Ftext: String;
     Fposition: String;
   public
+    /// <summary>
+    /// Position
+    /// </summary>
     property position : String read Fposition write Fposition;
+    /// <summary>
+    /// Preisgruppe
+    /// </summary>
     property pricegroup : String read Fpricegroup write Fpricegroup;
+    /// <summary>
+    /// Text
+    /// </summary>
     property text : String read Ftext write Ftext;
     property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct write FlinkedProduct;
     property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct write FlinkedHistoricProduct;
@@ -821,6 +832,8 @@ var
   jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
 
+  itemSparepartlistRow : TOpenMasterdataAPI_SparepartlistRow;
+
   procedure LoadMeasureUnitFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LogisticsMeasure);
   var jsonString2  : TJSONString;
   begin
@@ -843,6 +856,82 @@ var
       _Result.weight := jsonString2.Value;
     if _Val.TryGetValue<TJSONString>('unit',jsonString2) then
       _Result.unit_ := jsonString2.Value;
+  end;
+
+  procedure LoadTextRowFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_TextRow);
+  var jsonString2  : TJSONString;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('position',jsonString2) then
+      _Result.position := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('text',jsonString2) then
+      _Result.text := jsonString2.Value;
+  end;
+
+  procedure LoadLinkedProductFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LinkedProduct);
+  var jsonString2  : TJSONString;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('supplierPid',jsonString2) then
+      _Result.supplierPid := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('manufacturerId',jsonString2) then
+      _Result.manufacturerId := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('manufacturerIdType',jsonString2) then
+      _Result.manufacturerIdType := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('manufacturerPid',jsonString2) then
+      _Result.manufacturerPid := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('gtin',jsonString2) then
+      _Result.gtin := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('productShortDescr',jsonString2) then
+      _Result.productShortDescr := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('imageLink',jsonString2) then
+      _Result.imageLink := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('thumbnailUrl',jsonString2) then
+      _Result.thumbnailUrl := jsonString2.Value;
+  end;
+
+  procedure LoadLinkedHistoricProductFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LinkedHistoricProduct);
+  var jsonString2  : TJSONString;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('manufacturerId',jsonString2) then
+      _Result.manufacturerId := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('manufacturerIdType',jsonString2) then
+      _Result.manufacturerIdType := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('historicProduct',jsonString2) then
+      _Result.historicProduct := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('constructionFrom',jsonString2) then
+      _Result.constructionFrom := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('productShortDescr',jsonString2) then
+      _Result.productShortDescr := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('imageLink',jsonString2) then
+      _Result.imageLink := jsonString2.Value;
+  end;
+
+  procedure LoadArticleRowFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_ArticleRow);
+  var jsonString2  : TJSONString;
+    jsonValue : TJSONValue;
+  begin
+    if _Val = nil then exit;
+    if _Result = nil then exit;
+
+    if _Val.TryGetValue<TJSONString>('position',jsonString2) then
+      _Result.position := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('pricegroup',jsonString2) then
+      _Result.pricegroup := jsonString2.Value;
+    if _Val.TryGetValue<TJSONString>('text',jsonString2) then
+      _Result.text := jsonString2.Value;
+
+    if _Val.TryGetValue<TJSONValue>('linkedProduct',jsonValue) then
+      LoadLinkedProductFromJson(jsonValue,_Result.linkedProduct);
+    if _Val.TryGetValue<TJSONValue>('linkedHistoricProduct',jsonValue) then
+      LoadLinkedHistoricProductFromJson(jsonValue,_Result.linkedHistoricProduct);
   end;
 
 begin
@@ -1210,15 +1299,33 @@ begin
       if jsonValue.TryGetValue<TJSONString>('listNumber',jsonString) then
         sparepartlist.listNumber := jsonString.Value;
 
-//      if jsonValue.TryGetValue<TJSONArray>('sparepartlistRow',jsonArray) then
-//      for jsonValue2 in jsonArray do
-//      begin
-//        var itemSparepartlistRow : TOpenMasterdataAPI_SparepartlistRow := TOpenMasterdataAPI_SparepartlistRow.Create;
-//        sparepartlist.sparepartlistRow.Add(itemSparepartlistRow);
-//        TODO
-//        if jsonValue2.TryGetValue<TJSONString>('gtin',jsonString) then
-//          itemPackagingUnit.gtin := jsonString.Value;
-//      end;
+      jsonValue3 := jsonValue.FindValue('sparepartlistRow');
+      if jsonValue3 <> nil then
+      begin
+        if jsonValue3 is TJSONObject then
+        begin
+          itemSparepartlistRow := TOpenMasterdataAPI_SparepartlistRow.Create;
+          sparepartlist.sparepartlistRow.Add(itemSparepartlistRow);
+          if jsonValue3.TryGetValue<TJSONValue>('textRow',jsonValue2) then
+            LoadTextRowFromJson(jsonValue2,itemSparepartlistRow.textRow);
+          if jsonValue3.TryGetValue<TJSONValue>('articleRow',jsonValue2) then
+            LoadArticleRowFromJson(jsonValue2,itemSparepartlistRow.articleRow);
+        end
+        else
+        if jsonValue3 is TJSONArray then
+        begin
+          if jsonValue.TryGetValue<TJSONArray>('sparepartlistRow',jsonArray) then
+          for jsonValue2 in jsonArray do
+          begin
+            itemSparepartlistRow := TOpenMasterdataAPI_SparepartlistRow.Create;
+            sparepartlist.sparepartlistRow.Add(itemSparepartlistRow);
+            if jsonValue2.TryGetValue<TJSONValue>('textRow',jsonValue3) then
+              LoadTextRowFromJson(jsonValue3,itemSparepartlistRow.textRow);
+            if jsonValue2.TryGetValue<TJSONValue>('articleRow',jsonValue3) then
+              LoadArticleRowFromJson(jsonValue3,itemSparepartlistRow.articleRow);
+          end;
+        end;
+      end;
     end;
     if messageJson.TryGetValue<TJSONArray>('pictures',jsonArray) then
     for jsonValue in jsonArray do
