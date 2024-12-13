@@ -1,4 +1,4 @@
-﻿{
+{
 License OpenMasterdata-for-Delphi
 
 Copyright (C) 2024 Landrix Software GmbH & Co. KG
@@ -77,6 +77,9 @@ type
     FRefreshToken : String;
     FAccessTokenValidTo : TDateTime;
     //FCookie : String;
+
+    FOAuthUrl : String;
+    FBySupplierPIDUrl : String;
 
     FRESTClientOAuth: TRESTClient;
     FRESTClientBySupplierPID: TRESTClient;
@@ -261,7 +264,10 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientOAuth;
+    RESTRequest.Resource := FOAuthUrl;
     RESTRequest.Method := rmPOST;
+    RESTRequest.Accept := '*/*';
+
     case FGrantType of
       omdgt_Password:          RESTRequest.Params.AddItem('grant_type','password');
       omdgt_ClientCredentials: RESTRequest.Params.AddItem('grant_type','client_credentials');
@@ -270,7 +276,8 @@ begin
       RESTRequest.Params.AddItem('client_secret',FClientSecret);
     if not FClientScope.IsEmpty then
       RESTRequest.Params.AddItem('scope',FClientScope);
-    RESTRequest.Params.AddItem('client_id',FClientID);
+    if FClientID <> '' then
+      RESTRequest.Params.AddItem('client_id',FClientID);
 
     if (FUsername <> '') and (FCustomerNumber <> '') then
       RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
@@ -287,7 +294,7 @@ begin
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
-      FLastErrorMessage := RESTResponse.StatusText;
+      FLastErrorMessage := RESTResponse.StatusText+' '+RESTResponse.Content;
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
@@ -298,7 +305,7 @@ begin
     FAccessTokenValidTo := now;
     try
     try
-      itm.LoadFromJson(RESTResponse.Content);
+      itm.LoadFromJson(FLastOAuthResponseContent);
 
       if itm.access_token.IsEmpty then
         exit;
@@ -352,8 +359,10 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientOAuth;
+    RESTRequest.Resource := FOAuthUrl;
     RESTRequest.Params.AddItem('grant_type','refresh_token');
-    RESTRequest.Params.AddItem('client_id',FClientID);
+    if FClientID <> '' then
+      RESTRequest.Params.AddItem('client_id',FClientID);
     RESTRequest.Params.AddItem('refresh_token',FRefreshToken);
     RESTRequest.Response := RESTResponse;
 
@@ -431,6 +440,7 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientBySupplierPID;
+    RESTRequest.Resource := FBySupplierPIDUrl;
     RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
     //if FCookie <> '' then
     //  RESTRequest.AddAuthParameter('Cookie',FCookie,TRESTRequestParameterKind.pkCOOKIE, [TRESTRequestParameterOption.poDoNotEncode]);
@@ -549,8 +559,12 @@ end;
 
 procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
   const _URL : String);
+var
+  lUrl : TURI;
 begin
-  FRESTClientBySupplierPID.BaseURL := _URL;
+  lUrl := TURI.Create(_URL);
+  FBySupplierPIDUrl := lUrl.Path;
+  FRESTClientBySupplierPID.BaseURL := lUrl.Scheme+'://'+lUrl.Host+':'+lUrl.Port.ToString;
   FRESTClientBySupplierPID.Accept  := 'application/json';
   FRESTClientBySupplierPID.AcceptCharSet := 'UTF-8';
   FRESTClientBySupplierPID.ContentType   := 'application/json';
@@ -558,8 +572,12 @@ begin
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
+var
+  lUrl : TURI;
 begin
-  FRESTClientOAuth.BaseURL := _URL;
+  lUrl := TURI.Create(_URL);
+  FOAuthUrl := lUrl.Path;
+  FRESTClientOAuth.BaseURL := lUrl.Scheme+'://'+lUrl.Host+':'+lUrl.Port.ToString;
 end;
 
 { TOpenMasterdataApiClient.TValidateCertificatHelper }
