@@ -2,7 +2,9 @@
 
 # OpenMasterdata-for-Delphi
 
-Aktuell umgesetzte Version ist 9.x.x
+Aktuell umgesetzte Version ist 9.0.2
+
+Echte Response-Beispiele aus der Praxis sind ausdruecklich willkommen. Wenn Sie konkrete Responses aus produktiven oder realistischen Testszenarien zur Verfuegung stellen koennen, hilft das sehr dabei, Parser, Datenmodell und Darstellung gezielt gegen die tatsaechlich vorkommenden Varianten zu verbessern.
 
 ## Hinweise zum aktuellen Datenstand
 
@@ -17,6 +19,9 @@ Wichtige Erkenntnisse aus den Beispiel-Responses:
  - In einzelnen Responses existieren Feldabweichungen bzw. Inkonsistenzen wie `reachData` statt `reachDate`.
  - Bei Attribut-Beschreibungsfeldern gibt es eine Benennungsabweichung: die Doku und generierte DTOs verwenden eher `attributeValue1Descr` / `attributeValue2Descr`, reale Lieferanten-Responses liefern jedoch auch `attributeValue1Desc` / `attributeValue2Desc`.
  - Dokument- und Medienlisten unterscheiden sich je nach Lieferant teilweise in Vollständigkeit und Typisierung, deshalb sollte der Parser tolerant gegen fehlende optionale Felder bleiben.
+ - Die Diskussion zu `prices.rawMaterial` zeigt, dass einzelne Rohstoff-Beispielabbildungen in der bereitgestellten Doku fachlich widerspruechlich oder spaeter als fehlerhaft korrigiert sind. Insbesondere die Kombination aus `weightBasis`, `basisUnit`, `proportionByWeight` und `quotationOfRawMaterial` sollte immer gegen aktuelle Herstellerbeispiele oder abgestimmte Fachinterpretationen geprueft werden.
+ - Fuer Rohstoffangaben ist relevant, dass `rawMaterial` mehrfach vorkommen kann. Die Daten sollten daher als Liste und nicht als Einzelobjekt behandelt werden.
+ - In der Diskussion wird zusaetzlich ein moegliches Feld `rawMaterial/materialprice` erwaehnt. Dieses Feld ist nicht Teil der aktuell umgesetzten 9.0.2-Struktur und wird in der Bibliothek derzeit nicht geparst.
 
 Die aktuelle Delphi-Implementierung ist auf diese Abweichungen ausgelegt und versucht, die Daten möglichst robust und verlustarm zu laden.
 
@@ -31,6 +36,19 @@ Aktuell berücksichtigt der Loader insbesondere folgende Fälle:
  - Unterstützung des erweiterten Auslaufstatus über `expiringProduct`.
  - Fallback von `reachDate` auf `reachData`.
  - Unterstützung zusätzlicher Dokumenttypen wie `PL`.
+ - Unterstützung von Rohstofflisten unter `prices.rawMaterial`, inklusive `weightBasis`, `basisUnit`, `proportionByWeight`, `proportionUnit`, `quotationOfRawMaterial` und `currentQuotationOfRawMaterial`.
+ - Sichtbare HTML-Ausgabe für Alternativartikel, Nachfolgeartikel, Zubehörartikel und Rohstoffangaben.
+
+## Hinweise zu Rohstoffangaben
+
+Die Dokumentation zu den Rohstoffangaben ist nicht durchgehend konsistent. In der mitgelieferten Diskussion zu `rawMaterial` wird ein urspruengliches Beispiel spaeter ausdruecklich als fachlich fehlerhaft bezeichnet.
+
+Fuer die Implementierung bedeutet das:
+
+ - `prices.rawMaterial` wird als Liste geladen, da mehrere Rohstoffzuschlaege pro Artikel vorkommen koennen.
+ - Die aktuell umgesetzten Felder sind `material`, `weightBasis`, `basisUnit`, `proportionByWeight`, `proportionUnit`, `quotationOfRawMaterial` und `currentQuotationOfRawMaterial`.
+ - Die fachliche Bedeutung von `weightBasis` und `basisUnit` sollte bei neuen Lieferanten nicht allein aus der Doku abgeleitet werden, sondern immer gegen echte Responses oder abgestimmte Fachbeispiele verifiziert werden.
+ - Das in der Diskussion genannte Feld `materialprice` ist derzeit nicht Teil des Parsers, weil es in den bisher beruecksichtigten 9.x-Beispielen nicht stabil als Response-Feld belegt ist.
 
 Wenn neue Lieferanten angebunden werden, sollten die gelieferten Beispiel-Responses immer gegen die vorhandene Parserlogik geprüft werden, auch wenn sie formal zur 9.x-Dokumentation passen.
 

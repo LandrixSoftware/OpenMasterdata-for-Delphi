@@ -103,6 +103,63 @@ var
     Result := StringReplace(Result,#13,'',[rfReplaceAll]);
     Result := '<p>' + Result + '</p>';
   end;
+
+  procedure AddLinkedProductHtml(_Item : TOpenMasterdataAPI_LinkedProduct; const _ReferenceType : String = '');
+  var
+    imageUrl : String;
+  begin
+    if _Item = nil then
+      exit;
+
+    html.Add('<div style="margin-bottom:1rem;">');
+    imageUrl := IfThen(_Item.thumbnailUrl.IsEmpty,_Item.imageLink,_Item.thumbnailUrl);
+    if imageUrl <> '' then
+      html.Add('<img src="'+HtmlEncode(imageUrl)+'" style="max-width:180px;max-height:180px;display:block;margin-bottom:0.5rem;"></img>');
+    if _Item.productShortDescr <> '' then
+      html.Add('<strong>'+HtmlEncode(_Item.productShortDescr)+'</strong><br/>');
+    if _Item.manufacturerPid <> '' then
+      html.Add('Hersteller-Artikelnummer: '+HtmlEncode(_Item.manufacturerPid)+'<br/>');
+    if _Item.gtin <> '' then
+      html.Add('GTIN: '+HtmlEncode(_Item.gtin)+'<br/>');
+    if _ReferenceType <> '' then
+      html.Add('Referenztyp: '+HtmlEncode(_ReferenceType)+'<br/>');
+    html.Add('</div>');
+  end;
+
+  procedure AddAccessoryHtml(_Item : TOpenMasterdataAPI_Accessory);
+  begin
+    if _Item = nil then
+      exit;
+
+    AddLinkedProductHtml(_Item,_Item.referenceType);
+    if html.Count = 0 then
+      exit;
+
+    if _Item.amount > 0 then
+      html.Insert(html.Count-1,'Menge: '+FloatToStr(_Item.amount)+'<br/>');
+    if _Item.necessaryForFunction then
+      html.Insert(html.Count-1,'Funktionsrelevant: Ja<br/>')
+    else
+      html.Insert(html.Count-1,'Funktionsrelevant: Nein<br/>');
+  end;
+
+  procedure AddRawMaterialHtml(_Item : TOpenMasterdataAPI_Material);
+  begin
+    if _Item = nil then
+      exit;
+
+    html.Add('<div style="margin-bottom:1rem;">');
+    html.Add('<strong>'+HtmlEncode(TOpenMasterdataAPI_RawMaterialHelper.RawMaterialToStr(_Item.material))+'</strong><br/>');
+    if _Item.weightBasis > 0 then
+      html.Add('Basis: '+FloatToStr(_Item.weightBasis)+' '+HtmlEncode(_Item.basisUnit)+'<br/>');
+    if _Item.proportionByWeight > 0 then
+      html.Add('Anteil: '+FloatToStr(_Item.proportionByWeight)+' '+HtmlEncode(_Item.proportionUnit)+'<br/>');
+    if _Item.quotationOfRawMaterial > 0 then
+      html.Add('Rohstoffnotierung: '+FloatToStr(_Item.quotationOfRawMaterial)+'<br/>');
+    if _Item.currentQuotationOfRawMaterial > 0 then
+      html.Add('Aktuelle Rohstoffnotierung: '+FloatToStr(_Item.currentQuotationOfRawMaterial)+'<br/>');
+    html.Add('</div>');
+  end;
 begin
   Result := '';
   html := TStringList.Create;
@@ -125,6 +182,8 @@ begin
       else
         html.Add('Auslaufartikel.<br/>');
     end;
+    if _Val.additional.expiringDate > 0 then
+      html.Add('Auslaufdatum: '+DateToStr(_Val.additional.expiringDate)+'<br/>');
     if (_Val.basic.mainCommodityGroupId <> '') then
       html.Add('Hauptwarengruppe: '+HtmlEncode(_Val.basic.mainCommodityGroupId)+' '+HtmlEncode(_Val.basic.mainCommodityGroupDescr)+'<br/>');
     if (_Val.basic.commodityGroupId <> '') then
@@ -138,12 +197,36 @@ begin
       html.Add('Einkaufspreis: '+Format('%n %s',[_Val.prices.netPrice.ValueAsCurrency,_Val.prices.netPrice.currency])+'<br/>');
 
     html.Add('<br/>');
+    if _Val.prices.rawMaterial.Count > 0 then
+      html.Add('<h3>Rohstoffangaben</h3>');
+    for i := 0 to _Val.prices.rawMaterial.Count-1 do
+      AddRawMaterialHtml(_Val.prices.rawMaterial[i]);
+
+    html.Add('<br/>');
     if _Val.pictures.Count > 0 then
       html.Add('<h3>Bilder</h3>');
     for i := 0 to _Val.pictures.Count-1 do
     begin
       html.Add('<img src="'+HtmlEncode(IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail))+'"></img><br/>');
     end;
+
+    html.Add('<br/>');
+    if _Val.additional.alternativeProduct.Count > 0 then
+      html.Add('<h3>Alternativartikel</h3>');
+    for i := 0 to _Val.additional.alternativeProduct.Count-1 do
+      AddLinkedProductHtml(_Val.additional.alternativeProduct[i],_Val.additional.alternativeProduct[i].referenceType);
+
+    html.Add('<br/>');
+    if _Val.additional.followupProduct.Count > 0 then
+      html.Add('<h3>Nachfolgeartikel</h3>');
+    for i := 0 to _Val.additional.followupProduct.Count-1 do
+      AddLinkedProductHtml(_Val.additional.followupProduct[i],_Val.additional.followupProduct[i].referenceType);
+
+    html.Add('<br/>');
+    if _Val.additional.accessories.Count > 0 then
+      html.Add('<h3>Zubeh&ouml;rartikel</h3>');
+    for i := 0 to _Val.additional.accessories.Count-1 do
+      AddAccessoryHtml(_Val.additional.accessories[i]);
 
     html.Add('<br/>');
     if _Val.documents.Count > 0 then

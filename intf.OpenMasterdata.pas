@@ -39,9 +39,13 @@ type
     ['{425FC785-64D4-4A17-A012-49F60448EBF8}']
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    function GetByGTIN(_GTIN : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
 
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
+    procedure SetByManufacturerDataURL(const _URL : String);
+    procedure SetByGTINURL(const _URL : String);
 
     function GetData(_Url : String; out _Result : TStream) : Boolean;
 
@@ -74,9 +78,13 @@ type
 
     FOAuthUrl : String;
     FBySupplierPIDUrl : String;
+    FByManufacturerDataUrl : String;
+    FByGTINUrl : String;
 
     FRESTClientOAuth: TRESTClient;
     FRESTClientBySupplierPID: TRESTClient;
+    FRESTClientByManufacturerData: TRESTClient;
+    FRESTClientByGTIN: TRESTClient;
 
     FLastOAuthResponseContent : String;
     FLastBySupplierPIDResponseContent : String;
@@ -86,6 +94,12 @@ type
     function LoggedIn: Boolean;
     function Login : Boolean;
     function RefreshLogin : Boolean;
+    function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
+    function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource,
+      _IdentifierName1, _IdentifierValue1, _IdentifierName2, _IdentifierValue2,
+      _IdentifierName3, _IdentifierValue3 : String; _DataPackages : TOpenMasterdataAPI_DataPackages;
+      out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
   public
     constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType);
     destructor Destroy; override;
@@ -99,8 +113,12 @@ type
 
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
+    procedure SetByManufacturerDataURL(const _URL : String);
+    procedure SetByGTINURL(const _URL : String);
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    function GetByGTIN(_GTIN : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
   public
     function GetData(_Url : String; out _Result : TStream) : Boolean;
   public
@@ -303,6 +321,10 @@ begin
   FRESTClientOAuth.Name := 'RESTClientOAuth';
   FRESTClientBySupplierPID:= TRESTClient.Create(nil);
   FRESTClientBySupplierPID.Name := 'RESTClientBySupplierPID';
+  FRESTClientByManufacturerData := TRESTClient.Create(nil);
+  FRESTClientByManufacturerData.Name := 'RESTClientByManufacturerData';
+  FRESTClientByGTIN := TRESTClient.Create(nil);
+  FRESTClientByGTIN.Name := 'RESTClientByGTIN';
 
   FLastOAuthResponseContent := '';
   FLastBySupplierPIDResponseContent := '';
@@ -319,6 +341,8 @@ destructor TOpenMasterdataApiClient.Destroy;
 begin
   if Assigned(FRESTClientOAuth) then begin FRESTClientOAuth.Free; FRESTClientOAuth := nil; end;
   if Assigned(FRESTClientBySupplierPID) then begin FRESTClientBySupplierPID.Free; FRESTClientBySupplierPID := nil; end;
+  if Assigned(FRESTClientByManufacturerData) then begin FRESTClientByManufacturerData.Free; FRESTClientByManufacturerData := nil; end;
+  if Assigned(FRESTClientByGTIN) then begin FRESTClientByGTIN.Free; FRESTClientByGTIN := nil; end;
   if Assigned(FCS) then begin FCS.Free; FCS := nil; end;
   inherited;
 end;
@@ -530,6 +554,40 @@ end;
 function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+begin
+  Result := ExecuteProductRequest(FRESTClientBySupplierPID,FBySupplierPIDUrl,'supplierPid',_SupplierPid,_DataPackages,_Result);
+end;
+
+function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
+  _ManufacturerIdType, _ManufacturerPid: String;
+  _DataPackages: TOpenMasterdataAPI_DataPackages;
+  out _Result: TOpenMasterdataAPI_Result): Boolean;
+begin
+  Result := ExecuteProductRequest(FRESTClientByManufacturerData,FByManufacturerDataUrl,
+    'manufacturerId',_ManufacturerId,
+    'manufacturerIdType',_ManufacturerIdType,
+    'manufacturerPid',_ManufacturerPid,
+    _DataPackages,_Result);
+end;
+
+function TOpenMasterdataApiClient.GetByGTIN(_GTIN: String;
+  _DataPackages: TOpenMasterdataAPI_DataPackages;
+  out _Result: TOpenMasterdataAPI_Result): Boolean;
+begin
+  Result := ExecuteProductRequest(FRESTClientByGTIN,FByGTINUrl,'gtin',_GTIN,_DataPackages,_Result);
+end;
+
+function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
+  const _Resource, _IdentifierName, _IdentifierValue : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+begin
+  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,'','','','',_DataPackages,_Result);
+end;
+
+function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
+  const _Resource, _IdentifierName1, _IdentifierValue1, _IdentifierName2,
+  _IdentifierValue2, _IdentifierName3, _IdentifierValue3 : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
@@ -547,7 +605,13 @@ begin
   FLastErrorMessage := '';
   FLastErrorCode := 0;
 
-  if _SupplierPid.IsEmpty then
+  if (_RestClient = nil) or _Resource.IsEmpty then
+    exit;
+  if (_IdentifierName1 <> '') and _IdentifierValue1.IsEmpty then
+    exit;
+  if (_IdentifierName2 <> '') and _IdentifierValue2.IsEmpty then
+    exit;
+  if (_IdentifierName3 <> '') and _IdentifierValue3.IsEmpty then
     exit;
   if _DataPackages = [] then
     exit;
@@ -558,14 +622,19 @@ begin
     RESTResponse.Name := 'RESTResponse';
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
-    RESTRequest.Client := FRESTClientBySupplierPID;
-    RESTRequest.Resource := FBySupplierPIDUrl;
+    RESTRequest.Client := _RestClient;
+    RESTRequest.Resource := _Resource;
     RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
     //if FCookie <> '' then
     //  RESTRequest.AddAuthParameter('Cookie',FCookie,TRESTRequestParameterKind.pkCOOKIE, [TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Method := rmGET;
     //RESTRequest.URLAlreadyEncoded := true;
-    RESTRequest.AddParameter('supplierPid',TNetEncoding.URL.Encode(_SupplierPid),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    if _IdentifierName1 <> '' then
+      RESTRequest.AddParameter(_IdentifierName1,TNetEncoding.URL.Encode(_IdentifierValue1),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    if _IdentifierName2 <> '' then
+      RESTRequest.AddParameter(_IdentifierName2,TNetEncoding.URL.Encode(_IdentifierValue2),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    if _IdentifierName3 <> '' then
+      RESTRequest.AddParameter(_IdentifierName3,TNetEncoding.URL.Encode(_IdentifierValue3),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
     RESTRequest.Execute;
@@ -687,6 +756,32 @@ begin
   FRESTClientBySupplierPID.AcceptCharSet := 'UTF-8';
   FRESTClientBySupplierPID.ContentType   := 'application/json';
   FRESTClientBySupplierPID.HandleRedirects := true;
+end;
+
+procedure TOpenMasterdataApiClient.SetByManufacturerDataURL(const _URL: String);
+var
+  lUrl : TURI;
+begin
+  lUrl := TURI.Create(_URL);
+  FByManufacturerDataUrl := lUrl.Path;
+  FRESTClientByManufacturerData.BaseURL := BuildRestBaseUrl(lUrl);
+  FRESTClientByManufacturerData.Accept := 'application/json';
+  FRESTClientByManufacturerData.AcceptCharSet := 'UTF-8';
+  FRESTClientByManufacturerData.ContentType := 'application/json';
+  FRESTClientByManufacturerData.HandleRedirects := true;
+end;
+
+procedure TOpenMasterdataApiClient.SetByGTINURL(const _URL: String);
+var
+  lUrl : TURI;
+begin
+  lUrl := TURI.Create(_URL);
+  FByGTINUrl := lUrl.Path;
+  FRESTClientByGTIN.BaseURL := BuildRestBaseUrl(lUrl);
+  FRESTClientByGTIN.Accept := 'application/json';
+  FRESTClientByGTIN.AcceptCharSet := 'UTF-8';
+  FRESTClientByGTIN.ContentType := 'application/json';
+  FRESTClientByGTIN.HandleRedirects := true;
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);

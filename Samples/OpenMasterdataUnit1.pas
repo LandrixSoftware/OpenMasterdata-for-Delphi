@@ -179,6 +179,8 @@ begin
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
+    //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
+    //client.SetByGTINURL(Configuration.ReadString(ComboBox1.Text,'ByGTINURL',''));
   end;
 
   if client.GetData(ListBox2.Items[ListBox2.ItemIndex],data) then
@@ -317,6 +319,8 @@ begin
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
+    //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
+    //client.SetByGTINURL(Configuration.ReadString(ComboBox1.Text,'ByGTINURL',''));
   end;
 
   dataPackages := [];
