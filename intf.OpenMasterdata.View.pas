@@ -1,7 +1,7 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2024 Landrix Software GmbH & Co. KG
+Copyright (C) 2026 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 Licensed to the Apache Software Foundation (ASF) under one
@@ -55,6 +55,54 @@ var
     Result := StringReplace(Result,'>','&gt;',[rfReplaceAll]);
     Result := StringReplace(Result,'"','&quot;',[rfReplaceAll]);
   end;
+
+  function LooksLikeSupportedHtml(const _Value : String) : Boolean;
+  var
+    trimmedValue : String;
+  begin
+    trimmedValue := TrimLeft(_Value);
+    Result := ContainsText(trimmedValue,'<div')
+      or ContainsText(trimmedValue,'<p')
+      or ContainsText(trimmedValue,'<ul')
+      or ContainsText(trimmedValue,'<ol')
+      or ContainsText(trimmedValue,'<table')
+      or ContainsText(trimmedValue,'<span')
+      or ContainsText(trimmedValue,'<br')
+      or ContainsText(trimmedValue,'<strong')
+      or ContainsText(trimmedValue,'<em');
+  end;
+
+  function ContainsUnsafeHtml(const _Value : String) : Boolean;
+  begin
+    Result := ContainsText(_Value,'<script')
+      or ContainsText(_Value,'<iframe')
+      or ContainsText(_Value,'<object')
+      or ContainsText(_Value,'<embed')
+      or ContainsText(_Value,'<link')
+      or ContainsText(_Value,'<meta')
+      or ContainsText(_Value,'javascript:')
+      or ContainsText(_Value,'vbscript:')
+      or ContainsText(_Value,'data:text/html')
+      or ContainsText(_Value,' onload=')
+      or ContainsText(_Value,' onclick=')
+      or ContainsText(_Value,' onerror=')
+      or ContainsText(_Value,' onmouseover=');
+  end;
+
+  function RenderDescription(const _Value : String) : String;
+  begin
+    if _Value = '' then
+      exit('');
+
+    if LooksLikeSupportedHtml(_Value) and (not ContainsUnsafeHtml(_Value)) then
+      exit(_Value);
+
+    Result := HtmlEncode(_Value);
+    Result := StringReplace(Result,sLineBreak,'<br/>',[rfReplaceAll]);
+    Result := StringReplace(Result,#10,'<br/>',[rfReplaceAll]);
+    Result := StringReplace(Result,#13,'',[rfReplaceAll]);
+    Result := '<p>' + Result + '</p>';
+  end;
 begin
   Result := '';
   html := TStringList.Create;
@@ -64,7 +112,7 @@ begin
     html.Add('<h1>Artikel-Nr.: '+HtmlEncode(_Val.supplierPid)+'</h1>');
     html.Add('<h2>'+HtmlEncode(_Val.basic.productShortDescr)+'</h2>');
     if _Val.descriptions.productDescr <> '' then
-      html.Add('<p>'+HtmlEncode(_Val.descriptions.productDescr)+'</p>');
+      html.Add(RenderDescription(_Val.descriptions.productDescr));
 
     if (_Val.additional.deepLink <> '') then
       html.Add('<a href="'+HtmlEncode(_Val.additional.deepLink)+'" target="_blank">Weitere Details online</a><br/>');

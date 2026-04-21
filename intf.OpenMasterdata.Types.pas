@@ -1,7 +1,7 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2024 Landrix Software GmbH & Co. KG
+Copyright (C) 2026 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 Licensed to the Apache Software Foundation (ASF) under one
@@ -698,6 +698,9 @@ var
 begin
   messageJson := TJSONObject.ParseJSONValue(_JsonValue) as TJSONValue;
   try
+    if messageJson = nil then
+      raise EConvertError.Create('Invalid JSON content.');
+
     if messageJson.TryGetValue<TJSONString>('access_token',jsonString) then
       access_token := jsonString.Value;
     if messageJson.TryGetValue<TJSONString>('token_type',jsonString) then
@@ -860,6 +863,21 @@ var
     Result := TOpenMasterdataAPIHelper.JSONTryGetBoolean(_Json,_Name,_Value);
   end;
 
+  procedure LoadPriceFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
+  begin
+    if (_Val = nil) or (_Result = nil) then
+      exit;
+
+    if TryGetString(_Val,'value',valueAsString) then
+      _Result.value := valueAsString;
+    if TryGetString(_Val,'currency',valueAsString) then
+      _Result.currency := valueAsString;
+    if TryGetString(_Val,'basis',valueAsString) then
+      _Result.basis := StrToIntDef(valueAsString,1);
+    if TryGetString(_Val,'quantityUnit',valueAsString) then
+      _Result.quantityUnit := valueAsString;
+  end;
+
   function CarryingCategoryFromString(const _Value : String) : TOpenMasterdataAPI_CarryingCategory;
   begin
     case StrToIntDef(Trim(_Value),-1) of
@@ -979,6 +997,24 @@ var
       LoadLinkedHistoricProductFromJson(jsonValue,_Result.linkedHistoricProduct);
   end;
 
+  function JsonArrayToDelimitedString(_JsonArray : TJSONArray; const _Delimiter : String = ', ') : String;
+  var
+    itemValue : TJSONValue;
+  begin
+    Result := '';
+    if _JsonArray = nil then
+      exit;
+
+    for itemValue in _JsonArray do
+    begin
+      if itemValue = nil then
+        continue;
+      if Result <> '' then
+        Result := Result + _Delimiter;
+      Result := Result + itemValue.Value;
+    end;
+  end;
+
 begin
   messageJson := TJSONObject.ParseJSONValue(
        TOpenMasterdataHelper.FixJson(_JsonValue),
@@ -1002,61 +1038,34 @@ begin
     if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
     begin
       if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
-      begin
-        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-          prices.listPrice.value := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-          prices.listPrice.currency := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-          prices.listPrice.basis := StrToIntDef(jsonValue3.Value,1);
-        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-          prices.listPrice.quantityUnit := jsonString.Value;
-      end;
+        LoadPriceFromJson(jsonValue2,prices.listPrice);
       if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-      begin
-        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-          prices.rrp.value := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-          prices.rrp.currency := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-          prices.rrp.basis := StrToIntDef(jsonValue3.Value,1);
-        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-          prices.rrp.quantityUnit := jsonString.Value;
-      end;
+        LoadPriceFromJson(jsonValue2,prices.rrp);
       if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
-      begin
-        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-          prices.netprice.value := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-          prices.netprice.currency := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-          prices.netPrice.basis := StrToIntDef(jsonValue3.Value,1);
-        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-          prices.netprice.quantityUnit := jsonString.Value;
-      end;
+        LoadPriceFromJson(jsonValue2,prices.netPrice);
 
-      if jsonValue.TryGetValue<TJSONNumber>('taxCode',jsonNumber) then
-        prices.taxCode := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONString>('billBasis',jsonString) then
-        prices.billBasis := jsonString.Value;
+      if TryGetString(jsonValue,'taxCode',valueAsString) then
+        prices.taxCode := StrToIntDef(valueAsString,0);
+      if TryGetString(jsonValue,'billBasis',valueAsString) then
+        prices.billBasis := valueAsString;
       if jsonValue.TryGetValue<TJSONArray>('rawMaterial',jsonArray) then
       for jsonValue2 in jsonArray do
       begin
         var itemMaterial : TOpenMasterdataAPI_Material := TOpenMasterdataAPI_Material.Create;
         prices.rawMaterial.Add(itemMaterial);
 
-        if jsonValue2.TryGetValue<TJSONString>('material',jsonString) then
-          itemMaterial.material := TOpenMasterdataAPI_RawMaterialHelper.RawMaterialFromStr(jsonString.Value);
-        if jsonValue2.TryGetValue<TJSONString>('weightBasis',jsonString) then
-          itemMaterial.weightBasis := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
-        if jsonValue2.TryGetValue<TJSONString>('basisUnit',jsonString) then
-          itemMaterial.basisUnit := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('proportionByWeight',jsonString) then
-          itemMaterial.proportionByWeight := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
-        if jsonValue2.TryGetValue<TJSONString>('proportionUnit',jsonString) then
-          itemMaterial.proportionUnit := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('quotationOfRawMaterial',jsonString) then
-          itemMaterial.quotationOfRawMaterial := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if TryGetString(jsonValue2,'material',valueAsString) then
+          itemMaterial.material := TOpenMasterdataAPI_RawMaterialHelper.RawMaterialFromStr(valueAsString);
+        if TryGetString(jsonValue2,'weightBasis',valueAsString) then
+          itemMaterial.weightBasis := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
+        if TryGetString(jsonValue2,'basisUnit',valueAsString) then
+          itemMaterial.basisUnit := valueAsString;
+        if TryGetString(jsonValue2,'proportionByWeight',valueAsString) then
+          itemMaterial.proportionByWeight := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
+        if TryGetString(jsonValue2,'proportionUnit',valueAsString) then
+          itemMaterial.proportionUnit := valueAsString;
+        if TryGetString(jsonValue2,'quotationOfRawMaterial',valueAsString) then
+          itemMaterial.quotationOfRawMaterial := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
       end;
     end;
     if messageJson.TryGetValue<TJSONValue>('basic',jsonValue) then
@@ -1070,41 +1079,34 @@ begin
       if jsonValue.TryGetValue<TJSONBool>('priceOnDemand',jsonBool) then
         basic.priceOnDemand := jsonBool.AsBoolean;
       if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-      begin
-        if jsonValue2.TryGetValue<TJSONString>('value',jsonString) then
-          basic.rrp.value := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONString>('currency',jsonString) then
-          basic.rrp.currency := jsonString.Value;
-        if jsonValue2.TryGetValue<TJSONValue>('basis',jsonValue3) then
-          basic.rrp.basis := StrToIntDef(jsonValue3.Value,1);
-        if jsonValue2.TryGetValue<TJSONString>('quantityUnit',jsonString) then
-          basic.rrp.quantityUnit := jsonString.Value;
-      end;
-      if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupId',jsonString) then
-        basic.mainCommodityGroupId := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('mainCommodityGroupDescr',jsonString) then
-        basic.mainCommodityGroupDescr := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('commodityGroupId',jsonString) then
-        basic.commodityGroupId := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('commodityGroupDescr',jsonString) then
-        basic.commodityGroupDescr := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('noteOfUse',jsonString) then
-        basic.noteOfUse := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('matchcode',jsonString) then
-        basic.matchcode := jsonString.Value;
+        LoadPriceFromJson(jsonValue2,basic.rrp);
+      if TryGetString(jsonValue,'mainCommodityGroupId',valueAsString) then
+        basic.mainCommodityGroupId := valueAsString;
+      if TryGetString(jsonValue,'mainCommodityGroupDescr',valueAsString) then
+        basic.mainCommodityGroupDescr := valueAsString;
+      if TryGetString(jsonValue,'commodityGroupId',valueAsString) then
+        basic.commodityGroupId := valueAsString;
+      if TryGetString(jsonValue,'commodityGroupDescr',valueAsString) then
+        basic.commodityGroupDescr := valueAsString;
+      if TryGetString(jsonValue,'noteOfUse',valueAsString) then
+        basic.noteOfUse := valueAsString;
+      if TryGetString(jsonValue,'matchcode',valueAsString) then
+        basic.matchcode := valueAsString;
       if jsonValue.TryGetValue<TJSONString>('serie',jsonString) then
         basic.serie := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('modelNumber',jsonString) then
-        basic.modelNumber := jsonString.Value;
+      if (basic.serie = '') and jsonValue.TryGetValue<TJSONArray>('serie',jsonArray) then
+        basic.serie := JsonArrayToDelimitedString(jsonArray);
+      if TryGetString(jsonValue,'modelNumber',valueAsString) then
+        basic.modelNumber := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
     begin
-      if jsonValue.TryGetValue<TJSONString>('minOrderQuantity',jsonString) then
-        additional.minOrderQuantity := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
-      if jsonValue.TryGetValue<TJSONString>('minOrderUnit',jsonString) then
-        additional.minOrderUnit := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('articleNumberCatalogue',jsonString) then
-        additional.articleNumberCatalogue := jsonString.Value;
+      if TryGetString(jsonValue,'minOrderQuantity',valueAsString) then
+        additional.minOrderQuantity := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
+      if TryGetString(jsonValue,'minOrderUnit',valueAsString) then
+        additional.minOrderUnit := valueAsString;
+      if TryGetString(jsonValue,'articleNumberCatalogue',valueAsString) then
+        additional.articleNumberCatalogue := valueAsString;
       if jsonValue.TryGetValue<TJSONArray>('alternativeProduct',jsonArray) then
       for jsonValue2 in jsonArray do
       begin
@@ -1125,8 +1127,8 @@ begin
         if jsonValue2.TryGetValue<TJSONString>('referenceType',jsonString) then
           itemFollowupProduct.referenceType := jsonString.Value;
       end;
-      if jsonValue.TryGetValue<TJSONString>('deepLink',jsonString) then
-        additional.deepLink := jsonString.Value;
+      if TryGetString(jsonValue,'deepLink',valueAsString) then
+        additional.deepLink := valueAsString;
       additional.expiringProduct := false;
       additional.expiringProductHasSuccessor := false;
       additional.expiringProductState := '';
@@ -1147,8 +1149,8 @@ begin
         else
           additional.expiringProductState := 'No';
       end;
-      if jsonValue.TryGetValue<TJSONString>('expiringDate',jsonString) then
-        additional.expiringDate := TOpenMasterdataAPIHelper.JSONStrToDate(jsonString.Value);
+      if TryGetString(jsonValue,'expiringDate',valueAsString) then
+        additional.expiringDate := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
 
       if jsonValue.TryGetValue<TJSONString>('energyEfficiencyClass',jsonString) then
         additional.energyEfficiencyClass := jsonString.Value;
@@ -1175,10 +1177,10 @@ begin
         additional.accessories.Add(itemAccessory);
 
         LoadLinkedProductFromJson(jsonValue2,itemAccessory);
-        if jsonValue2.TryGetValue<TJSONString>('amount',jsonString) then
-          itemAccessory.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
-        if jsonValue2.TryGetValue<TJSONString>('referenceType',jsonString) then
-          itemAccessory.referenceType := jsonString.Value;
+        if TryGetString(jsonValue2,'amount',valueAsString) then
+          itemAccessory.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
+        if TryGetString(jsonValue2,'referenceType',valueAsString) then
+          itemAccessory.referenceType := valueAsString;
         if jsonValue2.TryGetValue<TJSONBool>('necessaryForFunction',jsonBool) then
           itemAccessory.necessaryForFunction := jsonBool.AsBoolean;
       end;
@@ -1189,8 +1191,8 @@ begin
         additional.sets.Add(itemSet);
 
         LoadLinkedProductFromJson(jsonValue2,itemSet);
-        if jsonValue2.TryGetValue<TJSONString>('amount',jsonString) then
-          itemSet.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if TryGetString(jsonValue2,'amount',valueAsString) then
+          itemSet.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
       end;
       if jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
       for jsonValue2 in jsonArray do
@@ -1227,12 +1229,12 @@ begin
         if TryGetString(jsonValue2,'attributeUnitDesc',valueAsString) then
           itemAttribute.attributeUnitDesc := valueAsString;
       end;
-      if jsonValue.TryGetValue<TJSONString>('constructionFrom',jsonString) then
-        additional.constructionFrom := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('constructionTo',jsonString) then
-        additional.constructionTo := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('constructionText',jsonString) then
-        additional.constructionText := jsonString.Value;
+      if TryGetString(jsonValue,'constructionFrom',valueAsString) then
+        additional.constructionFrom := valueAsString;
+      if TryGetString(jsonValue,'constructionTo',valueAsString) then
+        additional.constructionTo := valueAsString;
+      if TryGetString(jsonValue,'constructionText',valueAsString) then
+        additional.constructionText := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONValue>('descriptions',jsonValue) then
     begin
@@ -1249,14 +1251,14 @@ begin
     begin
       if jsonValue.TryGetValue<TJSONBool>('exportable',jsonBool) then
         logistics.exportable := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONString>('commodityNumber',jsonString) then
-        logistics.commodityNumber := StrToIntDef(jsonString.Value,0);
-      if jsonValue.TryGetValue<TJSONString>('countryOfOrigin',jsonString) then
-        logistics.countryOfOrigin := jsonString.Value;
+      if TryGetString(jsonValue,'commodityNumber',valueAsString) then
+        logistics.commodityNumber := StrToIntDef(valueAsString,0);
+      if TryGetString(jsonValue,'countryOfOrigin',valueAsString) then
+        logistics.countryOfOrigin := valueAsString;
       if jsonValue.TryGetValue<TJSONBool>('hazardousMaterial',jsonBool) then
         logistics.hazardousMaterial := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONString>('reachInfo',jsonString) then
-        logistics.reachInfo := jsonString.Value;
+      if TryGetString(jsonValue,'reachInfo',valueAsString) then
+        logistics.reachInfo := valueAsString;
       if TryGetString(jsonValue,'reachDate',valueAsString) then
         logistics.reachDate := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString)
       else
@@ -1266,10 +1268,10 @@ begin
         logistics.durabilityPeriod := StrToIntDef(valueAsString,0);
       if TryGetString(jsonValue,'standardDeliveryPeriod',valueAsString) then
         logistics.standardDeliveryPeriod := StrToIntDef(valueAsString,0);
-      if jsonValue.TryGetValue<TJSONString>('lucidNumber',jsonString) then
-        logistics.lucidNumber := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('packagingDisposalProvider',jsonString) then
-        logistics.packagingDisposalProvider := jsonString.Value;
+      if TryGetString(jsonValue,'lucidNumber',valueAsString) then
+        logistics.lucidNumber := valueAsString;
+      if TryGetString(jsonValue,'packagingDisposalProvider',valueAsString) then
+        logistics.packagingDisposalProvider := valueAsString;
       if jsonValue.TryGetValue<TJSONValue>('measureA',jsonValue2) then
         LoadMeasureUnitFromJson(jsonValue2,logistics.measureA);
       if jsonValue.TryGetValue<TJSONValue>('measureB',jsonValue2) then
@@ -1298,10 +1300,10 @@ begin
         var itemPackagingUnit : TOpenMasterdataAPI_PackagingUnit := TOpenMasterdataAPI_PackagingUnit.Create;
         logistics.packagingUnits.Add(itemPackagingUnit);
 
-        if jsonValue2.TryGetValue<TJSONString>('packagingType',jsonString) then
-          itemPackagingUnit.packagingType := TOpenMasterdataAPI_PackageTypeHelper.PackageTypeFromStr(jsonString.Value);
-        if jsonValue2.TryGetValue<TJSONString>('quantity',jsonString) then
-          itemPackagingUnit.quantity := TOpenMasterdataAPIHelper.JSONStrToFloat(jsonString.Value);
+        if TryGetString(jsonValue2,'packagingType',valueAsString) then
+          itemPackagingUnit.packagingType := TOpenMasterdataAPI_PackageTypeHelper.PackageTypeFromStr(valueAsString);
+        if TryGetString(jsonValue2,'quantity',valueAsString) then
+          itemPackagingUnit.quantity := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
         if TryGetString(jsonValue2,'gtin',valueAsString) then
           itemPackagingUnit.gtin := valueAsString;
         if jsonValue2.TryGetValue<TJSONValue>('measureA',jsonValue3) then
@@ -1429,6 +1431,8 @@ end;
 class function TOpenMasterdataAPIHelper.JSONStrToDate(
   _Val: String): TDate;
 var
+  parsedDate : TDateTime;
+  isoDate : TDateTime;
   yearPart : Word;
   monthPart : Word;
   dayPart : Word;
@@ -1442,11 +1446,21 @@ begin
     yearPart := StrToIntDef(Copy(_Val,1,4),0);
     monthPart := StrToIntDef(Copy(_Val,5,2),0);
     dayPart := StrToIntDef(Copy(_Val,7,2),0);
-    if TryEncodeDate(yearPart,monthPart,dayPart,Result) then
+    if TryEncodeDate(yearPart,monthPart,dayPart,parsedDate) then
+    begin
+      Result := DateOf(parsedDate);
       exit;
+    end;
     exit;
   end;
-  Result := ISO8601ToDate(_Val);
+  if TryISO8601ToDate(_Val,isoDate,false) then
+  begin
+    Result := DateOf(isoDate);
+    exit;
+  end;
+
+  if TryStrToDate(_Val,isoDate) then
+    Result := DateOf(isoDate);
 end;
 
 class function TOpenMasterdataAPIHelper.JSONStrToFloat(_Val: String): double;

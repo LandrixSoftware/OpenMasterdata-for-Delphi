@@ -1,7 +1,7 @@
 {
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2024 Landrix Software GmbH & Co. KG
+Copyright (C) 2026 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 Licensed to the Apache Software Foundation (ASF) under one
@@ -56,12 +56,6 @@ type
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
   public type
     TGrantType = (omdgt_Password,omdgt_ClientCredentials);
-  public type
-    TValidateCertificatHelper = class(TObject)
-      procedure DoValidateCertificateEvent(const Sender: TObject;
-                   const ARequest: TURLRequest; const Certificate: TCertificate;
-                   var Accepted: Boolean);
-    end;
   private
     FCS : TCriticalSection;
     FUsername,
@@ -119,6 +113,123 @@ implementation
 
 var
   openConnections : TInterfaceList;
+  openConnectionsCS : TCriticalSection;
+  openConnectionsInitLock : TObject;
+
+function NormalizeSingleLine(const _Value : String) : String;
+begin
+  Result := Trim(_Value);
+  Result := StringReplace(Result,#13#10,' ',[rfReplaceAll]);
+  Result := StringReplace(Result,#13,' ',[rfReplaceAll]);
+  Result := StringReplace(Result,#10,' ',[rfReplaceAll]);
+  while Pos('  ',Result) > 0 do
+    Result := StringReplace(Result,'  ',' ',[rfReplaceAll]);
+end;
+
+function StripHtmlTags(const _Value : String) : String;
+var
+  inTag : Boolean;
+  i : Integer;
+begin
+  Result := '';
+  inTag := false;
+  for i := 1 to Length(_Value) do
+  begin
+    case _Value[i] of
+      '<' : inTag := true;
+      '>' : inTag := false;
+    else
+      if not inTag then
+        Result := Result + _Value[i];
+    end;
+  end;
+  Result := NormalizeSingleLine(Result);
+end;
+
+function OAuthResponsePreview(const _Content : String) : String;
+begin
+  Result := StripHtmlTags(_Content);
+  if Result = '' then
+    Result := NormalizeSingleLine(_Content);
+  if Length(Result) > 240 then
+    Result := Copy(Result,1,240) + '...';
+end;
+
+function OAuthJsonErrorMessage(const _Content : String) : String;
+var
+  trimmedContent : String;
+begin
+  trimmedContent := Trim(_Content);
+  if trimmedContent = '' then
+    exit('OAuth response is empty.');
+
+  if (trimmedContent <> '') and (trimmedContent[1] = '<') then
+    Result := 'OAuth response is HTML instead of JSON: ' + OAuthResponsePreview(trimmedContent)
+  else
+    Result := 'OAuth response is not valid JSON: ' + OAuthResponsePreview(trimmedContent);
+end;
+
+function TryLoadAuthResult(const _Content : String; out _AuthResult : TOpenMasterdataAPI_AuthResult;
+  out _ErrorMessage : String) : Boolean;
+begin
+  Result := false;
+  _AuthResult := nil;
+  _ErrorMessage := '';
+
+  if Trim(_Content) = '' then
+  begin
+    _ErrorMessage := OAuthJsonErrorMessage(_Content);
+    exit;
+  end;
+
+  _AuthResult := TOpenMasterdataAPI_AuthResult.Create;
+  try
+    try
+      _AuthResult.LoadFromJson(_Content);
+    except
+      on E:Exception do
+      begin
+        _ErrorMessage := OAuthJsonErrorMessage(_Content);
+        if E.Message <> '' then
+          _ErrorMessage := _ErrorMessage + ' (' + E.Message + ')';
+        FreeAndNil(_AuthResult);
+        exit;
+      end;
+    end;
+
+    if _AuthResult.access_token.IsEmpty then
+    begin
+      _ErrorMessage := OAuthJsonErrorMessage(_Content);
+      FreeAndNil(_AuthResult);
+      exit;
+    end;
+
+    Result := true;
+  except
+    FreeAndNil(_AuthResult);
+    raise;
+  end;
+end;
+
+procedure EnsureOpenConnectionsInitialized;
+begin
+  TMonitor.Enter(openConnectionsInitLock);
+  try
+    if openConnections = nil then
+      openConnections := TInterfaceList.Create;
+    if openConnectionsCS = nil then
+      openConnectionsCS := TCriticalSection.Create;
+  finally
+    TMonitor.Exit(openConnectionsInitLock);
+  end;
+end;
+
+function BuildRestBaseUrl(const _Url : TURI) : String;
+begin
+  Result := _Url.Scheme+'://'+_Url.Host;
+  if _Url.Port > 0 then
+    Result := Result + ':' + _Url.Port.ToString;
+end;
 
 { TOpenMasterdataApiClient }
 
@@ -130,16 +241,20 @@ var
 begin
   Result := false;
 
-  if openConnections = nil then
-    openConnections := TInterfaceList.Create;
-
-  for i := 0 to openConnections.Count-1 do
-  if SameText(_ConnectionName,
-            IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
-  begin
-    _Connection := IOpenMasterdataApiClient(openConnections[i]);
-    Result := true;
-    break;
+  _Connection := nil;
+  EnsureOpenConnectionsInitialized;
+  openConnectionsCS.Acquire;
+  try
+    for i := 0 to openConnections.Count-1 do
+    if SameText(_ConnectionName,
+              IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+    begin
+      _Connection := IOpenMasterdataApiClient(openConnections[i]);
+      Result := true;
+      break;
+    end;
+  finally
+    openConnectionsCS.Release;
   end;
 end;
 
@@ -147,16 +262,27 @@ class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   _ConnectionName, _Username, _Password, _CustomerNumber, _ClientID,
   _ClientSecret,_ClientScope: String;
   _GrantType : TGrantType): IOpenMasterdataApiClient;
+var
+  i : Integer;
 begin
-  if openConnections = nil then
-    openConnections := TInterfaceList.Create;
+  Result := nil;
+  EnsureOpenConnectionsInitialized;
+  openConnectionsCS.Acquire;
+  try
+    for i := 0 to openConnections.Count-1 do
+    if SameText(_ConnectionName,
+              IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+    begin
+      Result := IOpenMasterdataApiClient(openConnections[i]);
+      exit;
+    end;
 
-  if GetOpenMasterdataConnection(_ConnectionName,Result) then
-    exit;
-
-  Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-               _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
-  openConnections.Add(Result);
+    Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
+                 _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
+    openConnections.Add(Result);
+  finally
+    openConnectionsCS.Release;
+  end;
 end;
 
 constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username,
@@ -243,6 +369,7 @@ var
   RESTRequest: TRESTRequest;
 
   itm : TOpenMasterdataAPI_AuthResult;
+  authError : String;
 begin
   //https://github.com/paolo-rossi/delphi-neon
   Result := false;
@@ -301,15 +428,14 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
-    try
-    try
-      itm.LoadFromJson(FLastOAuthResponseContent);
+    if not TryLoadAuthResult(FLastOAuthResponseContent,itm,authError) then
+    begin
+      FLastErrorMessage := authError;
+      exit;
+    end;
 
-      if itm.access_token.IsEmpty then
-        exit;
-
+    try
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
       FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
@@ -317,13 +443,6 @@ begin
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
       Result := true;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
     finally
       itm.Free;
     end;
@@ -339,6 +458,7 @@ var
   RESTRequest: TRESTRequest;
 
   itm : TOpenMasterdataAPI_AuthResult;
+  authError : String;
 begin
   //https://github.com/paolo-rossi/delphi-neon
   Result := false;
@@ -377,14 +497,19 @@ begin
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    itm := TOpenMasterdataAPI_AuthResult.Create;
     FAccessTokenValidTo := now;
-    try
-    try
-      itm.LoadFromJson(RESTResponse.Content);
+    if not TryLoadAuthResult(FLastOAuthResponseContent,itm,authError) then
+    begin
+      FLastErrorMessage := authError;
+      exit;
+    end;
 
-      if itm.access_token.IsEmpty or itm.refresh_token.IsEmpty then
+    try
+      if itm.refresh_token.IsEmpty then
+      begin
+        FLastErrorMessage := 'OAuth refresh response does not contain a refresh token.';
         exit;
+      end;
 
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
@@ -393,13 +518,6 @@ begin
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
       Result := true;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
-    end;
     finally
       itm.Free;
     end;
@@ -417,6 +535,7 @@ var
   RESTRequest: TRESTRequest;
 begin
   Result := false;
+  _Result := nil;
 
   FCS.Acquire;
   try
@@ -496,11 +615,11 @@ function TOpenMasterdataApiClient.GetData(_Url: String;
   out _Result: TStream): Boolean;
 var
   lHttp : THTTPClient;
-  lVCHelper : TOpenMasterdataApiClient.TValidateCertificatHelper;
   lData : TMemoryStream;
   lHeaders : TNetHeaders;
 begin
   Result := false;
+  _Result := nil;
 
   if _Url.IsEmpty then
     exit;
@@ -516,18 +635,17 @@ begin
 
   lHttp := THTTPClient.Create;
   lData := TMemoryStream.Create;
-  lVCHelper := TOpenMasterdataApiClient.TValidateCertificatHelper.Create;
   try
-    lHttp.OnValidateServerCertificate := lVCHelper.DoValidateCertificateEvent;
     try
       lHeaders := [TNetHeader.Create('Authorization','Bearer ' + FAccessToken)];
       with lHttp.Get(_URL,lData,lHeaders) do
       begin
         Result := StatusCode = 200;
-        if not Result then
-          lData.Free
-        else
+        if Result then
+        begin
           _Result := lData;
+          lData := nil;
+        end;
       end;
     except
       on E:Exception do
@@ -536,7 +654,7 @@ begin
       end;
     end;
   finally
-    lVCHelper.Free;
+    if Assigned(lData) then begin lData.Free; lData := nil; end;
     lHttp.Free;
   end;
 
@@ -564,7 +682,7 @@ var
 begin
   lUrl := TURI.Create(_URL);
   FBySupplierPIDUrl := lUrl.Path;
-  FRESTClientBySupplierPID.BaseURL := lUrl.Scheme+'://'+lUrl.Host+':'+lUrl.Port.ToString;
+  FRESTClientBySupplierPID.BaseURL := BuildRestBaseUrl(lUrl);
   FRESTClientBySupplierPID.Accept  := 'application/json';
   FRESTClientBySupplierPID.AcceptCharSet := 'UTF-8';
   FRESTClientBySupplierPID.ContentType   := 'application/json';
@@ -577,24 +695,19 @@ var
 begin
   lUrl := TURI.Create(_URL);
   FOAuthUrl := lUrl.Path;
-  FRESTClientOAuth.BaseURL := lUrl.Scheme+'://'+lUrl.Host+':'+lUrl.Port.ToString;
-end;
-
-{ TOpenMasterdataApiClient.TValidateCertificatHelper }
-
-procedure TOpenMasterdataApiClient.TValidateCertificatHelper.DoValidateCertificateEvent(
-  const Sender: TObject; const ARequest: TURLRequest;
-  const Certificate: TCertificate; var Accepted: Boolean);
-begin
-  Accepted := true;
+  FRESTClientOAuth.BaseURL := BuildRestBaseUrl(lUrl);
 end;
 
 initialization
 
   openConnections := nil;
+  openConnectionsCS := nil;
+  openConnectionsInitLock := TObject.Create;
 
 finalization
 
+  if Assigned(openConnectionsInitLock) then begin openConnectionsInitLock.Free; openConnectionsInitLock := nil; end;
+  if Assigned(openConnectionsCS) then begin openConnectionsCS.Free; openConnectionsCS := nil; end;
   if Assigned(openConnections) then begin openConnections.Free; openConnections := nil; end;
 
 end.

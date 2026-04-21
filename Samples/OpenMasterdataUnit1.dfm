@@ -15,7 +15,6 @@ object MainForm: TMainForm
   DesignSize = (
     782
     550)
-  TextHeight = 15
   object Label1: TLabel
     Left = 8
     Top = 12
@@ -33,7 +32,7 @@ object MainForm: TMainForm
   object Label3: TLabel
     Left = 471
     Top = 48
-    Width = 105
+    Width = 106
     Height = 15
     Caption = 'Testartikelnummern'
   end
@@ -101,6 +100,7 @@ object MainForm: TMainForm
     AllowSingleSignOnUsingOSPrimaryAccount = False
     TargetCompatibleBrowserVersion = '117.0.2045.28'
     UserDataFolder = '%LOCALAPPDATA%\bds.exe.WebView2'
+    OnCreateWebViewCompleted = EdgeBrowser1CreateWebViewCompleted
     OnWebResourceRequested = EdgeBrowser1WebResourceRequested
   end
   object CheckListBox1: TCheckListBox

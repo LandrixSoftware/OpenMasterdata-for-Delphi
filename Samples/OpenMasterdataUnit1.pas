@@ -1,7 +1,7 @@
 ﻿{
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2024 Landrix Software GmbH & Co. KG
+Copyright (C) 2026 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 Licensed to the Apache Software Foundation (ASF) under one
@@ -54,6 +54,8 @@ type
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure ComboBox1Select(Sender: TObject);
+    procedure EdgeBrowser1CreateWebViewCompleted(Sender: TCustomEdgeBrowser;
+      AResult: HRESULT);
     procedure EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
       Args: TWebResourceRequestedEventArgs);
     procedure Button1Click(Sender: TObject);
@@ -221,6 +223,22 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ByGTINURL',''));
+end;
+
+procedure TMainForm.EdgeBrowser1CreateWebViewCompleted(Sender: TCustomEdgeBrowser;
+  AResult: HRESULT);
+var
+  webView13 : ICoreWebView2_13;
+  profile : ICoreWebView2Profile;
+begin
+  if not Succeeded(AResult) then
+    exit;
+
+  if not Supports(Sender.DefaultInterface, ICoreWebView2_13, webView13) then
+    exit;
+
+  if Succeeded(webView13.Get_Profile(profile)) and Assigned(profile) then
+    profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
 procedure TMainForm.EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
