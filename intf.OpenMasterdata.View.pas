@@ -47,25 +47,40 @@ class function TOpenMasterdataAPI_ViewHelper.AsHtml(
 var
   html : TStringList;
   i : Integer;
+
+  function HtmlEncode(const _Value : String) : String;
+  begin
+    Result := StringReplace(_Value,'&','&amp;',[rfReplaceAll]);
+    Result := StringReplace(Result,'<','&lt;',[rfReplaceAll]);
+    Result := StringReplace(Result,'>','&gt;',[rfReplaceAll]);
+    Result := StringReplace(Result,'"','&quot;',[rfReplaceAll]);
+  end;
 begin
   Result := '';
   html := TStringList.Create;
   try
     html.Add('<html>');
     html.Add('<body>');
-    html.Add('<h1>Artikel-Nr.: '+_Val.supplierPid+'</h1>');
-    html.Add('<h2>'+_Val.basic.productShortDescr+'</h2>');
+    html.Add('<h1>Artikel-Nr.: '+HtmlEncode(_Val.supplierPid)+'</h1>');
+    html.Add('<h2>'+HtmlEncode(_Val.basic.productShortDescr)+'</h2>');
     if _Val.descriptions.productDescr <> '' then
-      html.Add('<p>'+_Val.descriptions.productDescr+'</p>');
+      html.Add('<p>'+HtmlEncode(_Val.descriptions.productDescr)+'</p>');
 
     if (_Val.additional.deepLink <> '') then
-      html.Add('<a href="'+_Val.additional.deepLink+'" target="_blank">Weitere Details online</a><br/>');
+      html.Add('<a href="'+HtmlEncode(_Val.additional.deepLink)+'" target="_blank">Weitere Details online</a><br/>');
     if _Val.basic.startOfValidity > 0 then
       html.Add('G&uuml;ltig ab: '+DateToStr(_Val.basic.startOfValidity)+'<br/>');
+    if _Val.additional.expiringProduct then
+    begin
+      if _Val.additional.expiringProductHasSuccessor then
+        html.Add('Auslaufartikel mit Nachfolgeartikel.<br/>')
+      else
+        html.Add('Auslaufartikel.<br/>');
+    end;
     if (_Val.basic.mainCommodityGroupId <> '') then
-      html.Add('Hauptwarengruppe: '+_Val.basic.mainCommodityGroupId+' '+_Val.basic.mainCommodityGroupDescr+'<br/>');
+      html.Add('Hauptwarengruppe: '+HtmlEncode(_Val.basic.mainCommodityGroupId)+' '+HtmlEncode(_Val.basic.mainCommodityGroupDescr)+'<br/>');
     if (_Val.basic.commodityGroupId <> '') then
-      html.Add('Warengruppe: '+_Val.basic.commodityGroupId+' '+_Val.basic.commodityGroupDescr+'<br/>');
+      html.Add('Warengruppe: '+HtmlEncode(_Val.basic.commodityGroupId)+' '+HtmlEncode(_Val.basic.commodityGroupDescr)+'<br/>');
     html.Add('<br/>');
     if (_Val.basic.priceOnDemand) then
       html.Add('Preis nur auf Anfrage.<br/>');
@@ -79,7 +94,7 @@ begin
       html.Add('<h3>Bilder</h3>');
     for i := 0 to _Val.pictures.Count-1 do
     begin
-      html.Add('<img src="'+IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail)+'"></img><br/>');
+      html.Add('<img src="'+HtmlEncode(IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail))+'"></img><br/>');
     end;
 
     html.Add('<br/>');
@@ -87,7 +102,23 @@ begin
       html.Add('<h3>Dokumente</h3>');
     for i := 0 to _Val.documents.Count-1 do
     begin
-      html.Add('<a href="'+_Val.documents[i].url+'">'+_Val.documents[i].url+'</a><br/>');
+      if _Val.documents[i].description <> '' then
+        html.Add(HtmlEncode(_Val.documents[i].description)+'<br/>');
+      html.Add('<a href="'+HtmlEncode(_Val.documents[i].url)+'">'+HtmlEncode(_Val.documents[i].url)+'</a><br/>');
+    end;
+
+    if _Val.additional.attribute.Count > 0 then
+    begin
+      html.Add('<br/>');
+      html.Add('<h3>Attribute</h3>');
+      for i := 0 to _Val.additional.attribute.Count-1 do
+      begin
+        html.Add('<strong>'+HtmlEncode(_Val.additional.attribute[i].attributeName)+'</strong>: '+
+          HtmlEncode(_Val.additional.attribute[i].attributeValue1));
+        if _Val.additional.attribute[i].attributeValue2 <> '' then
+          html[html.Count-1] := html[html.Count-1] + ' / ' + HtmlEncode(_Val.additional.attribute[i].attributeValue2);
+        html[html.Count-1] := html[html.Count-1] + '<br/>';
+      end;
     end;
 
     html.Add('');

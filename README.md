@@ -2,7 +2,37 @@
 
 # OpenMasterdata-for-Delphi
 
-Aktuell umgesetzte Version ist 1.1.0
+Aktuell umgesetzte Version ist 9.x.x
+
+## Hinweise zum aktuellen Datenstand
+
+Die mitgelieferte YAML/OpenAPI-Dokumentation ist nicht in allen Punkten auf dem neuesten Stand. Für die aktuelle Implementierung wurden daher zusätzlich die realen Beispiel-Responses als Referenz verwendet.
+
+Wichtige Erkenntnisse aus den Beispiel-Responses:
+
+ - Einige Felder kommen je nach Lieferant sowohl als String als auch als numerischer JSON-Wert vor, z. B. `gtin`, `packagingQuantity`, `durabilityPeriod` oder `standardDeliveryPeriod`.
+ - Datumsfelder sind nicht vollständig einheitlich. Neben ISO-Datumswerten kommen auch Formate wie `YYYYMMDD` vor.
+ - `additional.expiringProduct` ist nicht zuverlässig nur boolesch interpretierbar. In den Responses kommen Zustände wie `No`, `Yes` und `Yes-Successor` vor.
+ - In Attributlisten treten zusätzliche Felder wie `attributeClass`, `attributeValue2`, `attributeValue1Desc` und `attributeValue2Desc` auf.
+ - In einzelnen Responses existieren Feldabweichungen bzw. Inkonsistenzen wie `reachData` statt `reachDate`.
+ - Bei Attribut-Beschreibungsfeldern gibt es eine Benennungsabweichung: die Doku und generierte DTOs verwenden eher `attributeValue1Descr` / `attributeValue2Descr`, reale Lieferanten-Responses liefern jedoch auch `attributeValue1Desc` / `attributeValue2Desc`.
+ - Dokument- und Medienlisten unterscheiden sich je nach Lieferant teilweise in Vollständigkeit und Typisierung, deshalb sollte der Parser tolerant gegen fehlende optionale Felder bleiben.
+
+Die aktuelle Delphi-Implementierung ist auf diese Abweichungen ausgelegt und versucht, die Daten möglichst robust und verlustarm zu laden.
+
+## Implementierungsstand
+
+Aktuell berücksichtigt der Loader insbesondere folgende Fälle:
+
+ - Robustes Einlesen von String- und Zahlenwerten für identische Fachfelder.
+ - Robustes Parsen gängiger Datumsformate aus den bekannten Lieferanten-Responses.
+ - Unterstützung der neueren Attributfelder in `additional.attribute`.
+ - Unterstützung beider Schreibweisen bei Attribut-Beschreibungen: `...Desc` und `...Descr`.
+ - Unterstützung des erweiterten Auslaufstatus über `expiringProduct`.
+ - Fallback von `reachDate` auf `reachData`.
+ - Unterstützung zusätzlicher Dokumenttypen wie `PL`.
+
+Wenn neue Lieferanten angebunden werden, sollten die gelieferten Beispiel-Responses immer gegen die vorhandene Parserlogik geprüft werden, auch wenn sie formal zur 9.x-Dokumentation passen.
 
 Weitere Informationen unter 
 
@@ -30,7 +60,7 @@ Weitere Informationen unter
 
 License OpenMasterdata-for-Delphi
 
-Copyright (C) 2024 Landrix Software GmbH & Co. KG
+Copyright (C) 2026 Landrix Software GmbH & Co. KG
 Sven Harazim, info@landrix.de
 
 Licensed to the Apache Software Foundation (ASF) under one

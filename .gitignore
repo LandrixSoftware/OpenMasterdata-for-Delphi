@@ -30,6 +30,12 @@ Samples/Win32
 Samples/Win64
 Samples/configuration.ini
 Documentation/2021*
+CodeGen
+
+GPATH
+GRTAGS
+GTAGS
+GTEMP.PAS
 
 # Delphi compiler-generated binaries (safe to delete)
 *.exe

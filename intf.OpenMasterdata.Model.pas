@@ -67,7 +67,8 @@ type
     omd_doctype_KS,//Korrosionsschutz Dokumenttyp „KS“
     omd_doctype_CE,//CE-Konformitätserklärung Dokumenttyp „CE“
     omd_doctype_VD,//VDS-Zulassung Dokumenttyp „VD“
-    omd_doctype_SS//Schallschutznachweis Dokumenttyp „SS
+    omd_doctype_SS,//Schallschutznachweis Dokumenttyp „SS
+    omd_doctype_PL//Prüfreport Lithiumbatterie Dokumenttyp „PL
     );
 
   TOpenMasterdata_DocumentTypeHelper = class
@@ -317,6 +318,7 @@ begin
     omd_doctype_CE : Result := 'CE-Konformitätserklärung';//CE-Konformitätserklärung Dokumenttyp „CE“
     omd_doctype_VD : Result := 'VDS-Zulassung';//VDS-Zulassung Dokumenttyp „VD“
     omd_doctype_SS : Result := 'Schallschutznachweis';//Schallschutznachweis Dokumenttyp „SS
+    omd_doctype_PL : Result := 'Prüfreport Lithiumbatterie';//Prüfreport Lithiumbatterie Dokumenttyp „PL“
     else Result := '';
   end;
 end;
@@ -360,6 +362,7 @@ begin
   if SameText(_Val,'CE') then Result :=  omd_doctype_CE else//CE-Konformitätserklärung Dokumenttyp „CE“
   if SameText(_Val,'VD') then Result :=  omd_doctype_VD else//VDS-Zulassung Dokumenttyp „VD“
   if SameText(_Val,'SS') then Result :=  omd_doctype_SS else//Schallschutznachweis Dokumenttyp „SS
+  if SameText(_Val,'PL') then Result :=  omd_doctype_PL else//Prüfreport Lithiumbatterie Dokumenttyp „PL“
     Result := omd_doctype_None;
 end;
 
