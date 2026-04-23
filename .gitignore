@@ -29,8 +29,10 @@
 Samples/Win32
 Samples/Win64
 Samples/configuration.ini
-Documentation/2021*
+Documentation/OpenMasterdata 9.0.2
 CodeGen
+Testresponses
+.vscode
 
 GPATH
 GRTAGS

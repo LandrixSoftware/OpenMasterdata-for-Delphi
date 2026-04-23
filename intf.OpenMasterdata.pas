@@ -60,6 +60,7 @@ type
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
   public type
     TGrantType = (omdgt_Password,omdgt_ClientCredentials);
+    TDataPackagesSendMode = (omddpsm_PipeDelimited,omddpsm_Exploded);
   private
     FCS : TCriticalSection;
     FUsername,
@@ -70,6 +71,7 @@ type
     FClientScope,
     FConnectionName : String;
     FGrantType : TGrantType;
+    FDataPackagesSendMode : TDataPackagesSendMode;
 
     FAccessToken : String;
     FRefreshToken : String;
@@ -101,7 +103,7 @@ type
       _IdentifierName3, _IdentifierValue3 : String; _DataPackages : TOpenMasterdataAPI_DataPackages;
       out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
   public
-    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType);
+    constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode);
     destructor Destroy; override;
   public
     function GetConnectionName : String;
@@ -123,8 +125,9 @@ type
     function GetData(_Url : String; out _Result : TStream) : Boolean;
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
-    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType) : IOpenMasterdataApiClient;
+    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode) : IOpenMasterdataApiClient;
     class function GetGrantTypeFromString(const _Val : String; _Default : TGrantType = TGrantType.omdgt_Password) : TGrantType;
+    class function GetDataPackagesSendModeFromString(const _Val : String; _Default : TDataPackagesSendMode = TDataPackagesSendMode.omddpsm_PipeDelimited) : TDataPackagesSendMode;
   end;
 
 implementation
@@ -249,6 +252,30 @@ begin
     Result := Result + ':' + _Url.Port.ToString;
 end;
 
+function BuildExplodedDataPackageResource(const _Resource : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages) : String;
+var
+  dataPackage : TOpenMasterdataAPI_DataPackage;
+  hasQuery : Boolean;
+begin
+  Result := _Resource;
+  hasQuery := Pos('?',Result) > 0;
+
+  for dataPackage := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+  if dataPackage in _DataPackages then
+  begin
+    if hasQuery then
+      Result := Result + '&'
+    else
+    begin
+      Result := Result + '?';
+      hasQuery := true;
+    end;
+    Result := Result + 'datapackage=' + TNetEncoding.URL.Encode(
+      TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(dataPackage));
+  end;
+end;
+
 { TOpenMasterdataApiClient }
 
 class function TOpenMasterdataApiClient.GetOpenMasterdataConnection(
@@ -279,7 +306,7 @@ end;
 class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   _ConnectionName, _Username, _Password, _CustomerNumber, _ClientID,
   _ClientSecret,_ClientScope: String;
-  _GrantType : TGrantType): IOpenMasterdataApiClient;
+  _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode): IOpenMasterdataApiClient;
 var
   i : Integer;
 begin
@@ -296,7 +323,7 @@ begin
     end;
 
     Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-                 _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType);
+                 _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
     openConnections.Add(Result);
   finally
     openConnectionsCS.Release;
@@ -305,7 +332,7 @@ end;
 
 constructor TOpenMasterdataApiClient.Create(_ConnectionName, _Username,
   _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope: String;
-  _GrantType : TGrantType);
+  _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode);
 begin
   FConnectionName := _ConnectionName;
   FUsername := _Username;
@@ -315,6 +342,7 @@ begin
   FClientSecret := _ClientSecret;
   FClientScope := _ClientScope;
   FGrantType := _GrantType;
+  FDataPackagesSendMode := _DataPackagesSendMode;
   FCS := TCriticalSection.Create;
 
   FRESTClientOAuth:= TRESTClient.Create(nil);
@@ -623,7 +651,10 @@ begin
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := _RestClient;
-    RESTRequest.Resource := _Resource;
+    if FDataPackagesSendMode = TDataPackagesSendMode.omddpsm_Exploded then
+      RESTRequest.Resource := BuildExplodedDataPackageResource(_Resource,_DataPackages)
+    else
+      RESTRequest.Resource := _Resource;
     RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
     //if FCookie <> '' then
     //  RESTRequest.AddAuthParameter('Cookie',FCookie,TRESTRequestParameterKind.pkCOOKIE, [TRESTRequestParameterOption.poDoNotEncode]);
@@ -635,7 +666,8 @@ begin
       RESTRequest.AddParameter(_IdentifierName2,TNetEncoding.URL.Encode(_IdentifierValue2),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     if _IdentifierName3 <> '' then
       RESTRequest.AddParameter(_IdentifierName3,TNetEncoding.URL.Encode(_IdentifierValue3),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
-    RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    if FDataPackagesSendMode = TDataPackagesSendMode.omddpsm_PipeDelimited then
+      RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
     RESTRequest.Execute;
 
@@ -732,6 +764,18 @@ begin
   end;
 end;
 
+class function TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(const _Val: String;
+  _Default: TDataPackagesSendMode): TDataPackagesSendMode;
+begin
+  if SameText(_Val,'pipedelimited') then
+    Result := TOpenMasterdataApiClient.TDataPackagesSendMode.omddpsm_PipeDelimited
+  else
+  if SameText(_Val,'exploded') then
+    Result := TOpenMasterdataApiClient.TDataPackagesSendMode.omddpsm_Exploded
+  else
+    Result := _Default;
+end;
+
 class function TOpenMasterdataApiClient.GetGrantTypeFromString(
   const _Val: String; _Default: TGrantType): TGrantType;
 begin
@@ -790,6 +834,8 @@ var
 begin
   lUrl := TURI.Create(_URL);
   FOAuthUrl := lUrl.Path;
+  if lUrl.Query <> '' then
+    FOAuthUrl := FOAuthUrl + '?' + lUrl.Query;
   FRESTClientOAuth.BaseURL := BuildRestBaseUrl(lUrl);
 end;
 

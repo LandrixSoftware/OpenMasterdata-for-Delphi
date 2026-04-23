@@ -96,6 +96,7 @@ begin
   //ClientSecret=
   //ClientScope=openMasterdata
   //GrantType=password or client_credentials
+  //DataPackageSendMode=pipedelimited or exploded
   //UsernameRequired=True or False
   //CustomernumberRequired=True or False
   //ClientSecretRequired=True or False
@@ -169,6 +170,7 @@ begin
   if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
   begin
     var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
+    var dpsm : TOpenMasterdataApiClient.TDataPackagesSendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
 
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
@@ -176,7 +178,7 @@ begin
                Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
+               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
     //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
@@ -218,6 +220,7 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecret',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
+  Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'UsernameRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'CustomernumberRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecretRequired',''));
@@ -309,6 +312,7 @@ begin
   if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
   begin
     var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
+    var dpsm : TOpenMasterdataApiClient.TDataPackagesSendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
 
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
@@ -316,7 +320,7 @@ begin
                Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt);
+               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
     client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
     client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
     //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
