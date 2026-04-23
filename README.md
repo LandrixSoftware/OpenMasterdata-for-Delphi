@@ -59,20 +59,20 @@ Weitere Informationen unter
 
 # Lieferanten mit Open Masterdata-Unterstützung
 
-| Lieferant | ja | geplant | nein |
-|----------|----------|----------|----------
-| GC-Gruppe | x | - | - |
-| Pietsch | x | - | - |
-| Pürsch | - | - | x |
-| Sanitär-Heinze | x | - | - |
-| ZVSHK | x | - | - |
+| Lieferant | ClientIDRequired | GrantType | DataPackageSendMode | UsernameRequired | CustomerNumberRequired | ClientSecretRequired |
+|----------|----------|----------|----------|----------|----------|----------|
+| MAINMETALL Grosshandelsgesellschaft m.b.H. | ja | password | pipedelimited | ja | nein | nein |
+| GC-Gruppe GC ONLINE PLUS | ja | client_credentials | pipedelimited | ja | nein | ja |
+| WIEDEMANN GmbH & Co. KG | ja | password | pipedelimited | ja | nein | nein |
+| HSH Rose GmbH | ja | password | pipedelimited | ja | nein | ja |
+| Mosecker Osnabrueck | ja | password | pipedelimited | ja | nein | ja |
+| Buderus Deutschland | ja | password | pipedelimited | ja | nein | ja |
+| FEGA & Schmitt Elektrogroßhandel GmbH | ja | password | pipedelimited | ja | ja | ja |
+| Pietsch Haustechnik GmbH | ja | password | pipedelimited | ja | nein | nein |
+| Sanitär-Heinze GmbH & Co. KG | ja | password | pipedelimited | ja | nein | nein |
+| Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
+| Sonepar | ja | password | exploded | ja | ja | nein |
 
-## Art der Authentifizierung
-
- - GC-Gruppe: ClientID, Client-Secret - Registrierung erforderlich
- - Pietsch:
- - Sanitär-Heinze: CliendID (eigene ID) - Registrierung erforderlich
- - ZVSHK: CliendID (eigene ID) - Registrierung erforderlich
 
 # Lizenz / License
 
