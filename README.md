@@ -72,6 +72,7 @@ Weitere Informationen unter
 | Sanitär-Heinze GmbH & Co. KG | ja | password | pipedelimited | ja | nein | nein |
 | Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Sonepar | ja | password | exploded | ja | ja | nein |
+| Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
 
 
 # Lizenz / License

@@ -143,10 +143,7 @@ begin
       _Result.LoadFromJson(TFile.ReadAllText(basePath+'Documentation\OpenMasterdata 1.1.0\sample.json'));
     except
       on E:Exception do
-      begin
-        //FLastErrorMessage := E.ClassName+' '+e.Message;
-        exit;
-      end;
+        MessageDlg('Read-Error Reference-Sample'+#10+E.ClassName+' '+e.Message, mtError, [mbOK], 0);
     end;
     finally
       _Result.Free;
