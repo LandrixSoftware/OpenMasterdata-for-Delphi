@@ -73,7 +73,7 @@ Weitere Informationen unter
 | Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Sonepar | ja | password | exploded | ja | ja | nein |
 | Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
-
+| Reisser AG| ja | password | pipedelimited | ja | ja | nein |
 
 # Lizenz / License
 
