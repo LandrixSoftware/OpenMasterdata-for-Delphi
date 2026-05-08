@@ -74,6 +74,7 @@ Weitere Informationen unter
 | Sonepar | ja | password | exploded | ja | ja | nein |
 | Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
 | Reisser AG| ja | password | pipedelimited | ja | ja | nein |
+| Viessmann| ja | password | pipedelimited | ja | Nein | Ja |
 
 # Lizenz / License
 
