@@ -185,6 +185,9 @@ type
     procedure SetRetryPolicy(_MaxRetries, _MaxDelaySeconds : Integer);
     //Entscheidet, ob ein Status wiederholt wird und wie lange vorher zu warten
     //ist. Als reine Funktion ausgelegt, damit sie sich testen laesst.
+    //Beschreibt, warum eine OAuth-Antwort keinen Token enthaelt. Oeffentlich,
+    //damit die Meldung ohne Server geprueft werden kann.
+    class function DescribeOAuthFailure(const _Content : String) : String;
     class function TryGetRetryDelay(_StatusCode, _Attempt, _MaxRetries, _MaxDelaySeconds : Integer;
       const _RetryAfterHeader : String; out _DelayMilliseconds : Integer) : Boolean; static;
     //Begrenzt die Werte einer Wiederholungsstrategie auf den zulaessigen
@@ -259,18 +262,59 @@ begin
     Result := Copy(Result,1,240) + '...';
 end;
 
+//Ein Token-Endpunkt kann mit gueltigem JSON antworten und trotzdem keinen
+//Token liefern. RFC 6749 Abschnitt 5.2 sieht dafuer error und
+//error_description vor. Deren Text nennt den Grund und ist fuer die
+//Fehlersuche weit brauchbarer als der Hinweis, die Antwort sei kein JSON.
 function OAuthJsonErrorMessage(const _Content : String) : String;
 var
-  trimmedContent : String;
+  trimmedContent,errorCode,errorDescr : String;
+  jsonValue : TJSONValue;
+  jsonString : TJSONString;
 begin
   trimmedContent := Trim(_Content);
   if trimmedContent = '' then
     exit('OAuth response is empty.');
 
-  if (trimmedContent <> '') and (trimmedContent[1] = '<') then
-    Result := 'OAuth response is HTML instead of JSON: ' + OAuthResponsePreview(trimmedContent)
-  else
-    Result := 'OAuth response is not valid JSON: ' + OAuthResponsePreview(trimmedContent);
+  if trimmedContent[1] = '<' then
+    exit('OAuth response is HTML instead of JSON: ' + OAuthResponsePreview(trimmedContent));
+
+  try
+    jsonValue := TJSONObject.ParseJSONValue(trimmedContent);
+  except
+    //Eine unlesbare Antwort wird unten als solche gemeldet
+    jsonValue := nil;
+  end;
+
+  if jsonValue <> nil then
+  try
+    if jsonValue is TJSONObject then
+    begin
+      errorCode := '';
+      errorDescr := '';
+      if TJSONObject(jsonValue).TryGetValue<TJSONString>('error',jsonString) then
+        errorCode := jsonString.Value;
+      if TJSONObject(jsonValue).TryGetValue<TJSONString>('error_description',jsonString) then
+        errorDescr := jsonString.Value;
+
+      if (errorCode <> '') or (errorDescr <> '') then
+      begin
+        Result := 'OAuth server reported an error';
+        if errorCode <> '' then
+          Result := Result + ' (' + errorCode + ')';
+        if errorDescr <> '' then
+          Result := Result + ': ' + NormalizeSingleLine(errorDescr);
+        exit;
+      end;
+
+      //Gueltiges JSON, aber ohne Token und ohne Fehlerfeld
+      exit('OAuth response contains no access_token: ' + OAuthResponsePreview(trimmedContent));
+    end;
+  finally
+    jsonValue.Free;
+  end;
+
+  Result := 'OAuth response is not valid JSON: ' + OAuthResponsePreview(trimmedContent);
 end;
 
 function TryLoadAuthResult(const _Content : String; out _AuthResult : TOpenMasterdataAPI_AuthResult;
@@ -553,6 +597,12 @@ end;
 
 //Wiederholt werden nur Antworten, die eine voruebergehende Ueberlast anzeigen.
 //Alle uebrigen 4xx wuerden beim zweiten Versuch genauso beantwortet.
+class function TOpenMasterdataApiClient.DescribeOAuthFailure(
+  const _Content: String): String;
+begin
+  Result := OAuthJsonErrorMessage(_Content);
+end;
+
 class function TOpenMasterdataApiClient.TryGetRetryDelay(_StatusCode, _Attempt,
   _MaxRetries, _MaxDelaySeconds: Integer; const _RetryAfterHeader: String;
   out _DelayMilliseconds: Integer): Boolean;

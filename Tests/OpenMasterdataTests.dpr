@@ -1,4 +1,4 @@
-{
+﻿{
 License OpenMasterdata-for-Delphi
 
 Copyright (C) 2026 Landrix Software GmbH & Co. KG
@@ -1023,6 +1023,56 @@ end;
 
 //Die Ursprungspruefung entscheidet, ob ein Zugriffstoken mitgesendet werden
 //darf. Ein Praefixvergleich waere hier eine Luecke.
+//Scheitert ein Login, entscheidet die Meldung darueber, ob der Anwender die
+//Ursache findet. Die Antworten stammen aus echten Zugaengen.
+procedure TestOAuthFailureMessage;
+
+  function Describe(const _Content : String) : String;
+  begin
+    Result := TOpenMasterdataApiClient.DescribeOAuthFailure(_Content);
+  end;
+
+var
+  msg : String;
+begin
+  Writeln('Meldung bei fehlgeschlagenem Login');
+
+  //FEGA & Schmitt: gueltiges JSON, aber nur ein Fehlerfeld
+  msg := Describe('{"error":"Anmeldung fehlgeschlagen!"}');
+  Check('Fehlertext des Servers wird genannt',
+    ContainsText(msg,'Anmeldung fehlgeschlagen'),msg);
+  Check('nicht faelschlich als ungueltiges JSON gemeldet',
+    not ContainsText(msg,'not valid JSON'),msg);
+
+  //Richter+Frenzel: error samt Beschreibung nach RFC 6749
+  msg := Describe('{"error_description":"OAuth 2.0 Parameter: grant_type",'+
+                  '"error":"unsupported_grant_type"}');
+  Check('Fehlercode wird genannt',ContainsText(msg,'unsupported_grant_type'),msg);
+  Check('Beschreibung wird genannt',ContainsText(msg,'OAuth 2.0 Parameter'),msg);
+
+  //Gueltiges JSON, kein Token, kein Fehlerfeld
+  msg := Describe('{"foo":"bar"}');
+  Check('fehlender Token wird benannt',ContainsText(msg,'no access_token'),msg);
+
+  //Eine Anmeldeseite statt einer Token-Antwort
+  msg := Describe('<html><body>Bitte anmelden</body></html>');
+  Check('HTML wird als solches gemeldet',ContainsText(msg,'HTML'),msg);
+  Check('Text der Seite bleibt lesbar',ContainsText(msg,'Bitte anmelden'),msg);
+
+  //Wirklich kein JSON
+  msg := Describe('Access denied');
+  Check('unlesbare Antwort wird gemeldet',ContainsText(msg,'not valid JSON'),msg);
+  Check('Inhalt bleibt sichtbar',ContainsText(msg,'Access denied'),msg);
+
+  //Leere Antwort
+  msg := Describe('   ');
+  Check('leere Antwort wird gemeldet',ContainsText(msg,'empty'),msg);
+
+  //Ein Zugriffstoken darf nie in der Meldung landen
+  msg := Describe('{"error":"invalid_grant","access_token":"GEHEIM123"}');
+  Check('Token erscheint nicht in der Meldung',not ContainsText(msg,'GEHEIM123'),msg);
+end;
+
 procedure TestSameOrigin;
 
   function Origin(const _Uri : String) : Boolean;
@@ -1172,6 +1222,8 @@ begin
     TestRetryPolicyLimits;
     Writeln;
     TestSameOrigin;
+    Writeln;
+    TestOAuthFailureMessage;
     Writeln;
 
     if ParamCount > 0 then
