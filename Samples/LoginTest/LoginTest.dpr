@@ -27,9 +27,15 @@ under the License.
 {$APPTYPE CONSOLE}
 
 //Probiert fuer jeden Zugang aus Samples\configuration.ini einen Login samt
-//einer Artikelabfrage und meldet, was der Server geantwortet hat. Damit laesst
-//sich vor einer Auslieferung pruefen, welche Zugaenge noch gelten und ob eine
-//Aenderung an der Bibliothek einen Lieferanten bricht.
+//einer vollstaendigen Artikelabfrage, liest die Antwort ein und meldet, was
+//angekommen ist. Damit laesst sich vor einer Auslieferung pruefen, welche
+//Zugaenge noch gelten und ob eine Aenderung an der Bibliothek einen
+//Lieferanten bricht.
+//
+//Scheitert die Abfrage aller Datenpakete, grenzt das Programm die Ursache
+//ein: es probiert den anderen DataPackageSendMode und danach jedes Paket
+//einzeln. So wird sichtbar, ob der Lieferant den Sendemodus nicht versteht
+//oder ob ein einzelnes Datenpaket den Fehler ausloest.
 //
 //Aufruf:
 //  LoginTest.exe                     alle Zugaenge
@@ -83,6 +89,42 @@ begin
   Result := _Ini.ReadString(_Section,'Customernumber','');
 end;
 
+function ConfiguredGrantType(_Ini : TMemIniFile; const _Section : String) : TOpenMasterdataGrantType;
+begin
+  Result := TOpenMasterdataApiClient.GetGrantTypeFromString(
+              _Ini.ReadString(_Section,'GrantType',''));
+  //Zur Fehlersuche laesst sich der Grant-Type uebersteuern, ohne die
+  //Konfiguration zu aendern
+  if SameText(ParamStr(2),'cc') then
+    Result := omdgt_ClientCredentials
+  else
+  if SameText(ParamStr(2),'pw') then
+    Result := omdgt_Password;
+end;
+
+//Baut eine Verbindung nach der Konfiguration auf. Der Verbindungsname muss je
+//Versuch verschieden sein, sonst liefert die Bibliothek die zuvor angelegte
+//Verbindung samt ihrer Einstellungen zurueck.
+function CreateClient(_Ini : TMemIniFile; const _Section,_ConnectionName : String;
+  _SendMode : TOpenMasterdataDataPackagesSendMode) : IOpenMasterdataApiClient;
+begin
+  TOpenMasterdataApiClient.RemoveOpenMasterdataConnection(_ConnectionName);
+  Result := TOpenMasterdataApiClient.NewOpenMasterdataConnection(_ConnectionName,
+              _Ini.ReadString(_Section,'Username',''),
+              _Ini.ReadString(_Section,'Password',''),
+              ConfiguredCustomerNumber(_Ini,_Section),
+              _Ini.ReadString(_Section,'ClientID',''),
+              _Ini.ReadString(_Section,'ClientSecret',''),
+              _Ini.ReadString(_Section,'ClientScope',''),
+              ConfiguredGrantType(_Ini,_Section),_SendMode);
+  Result.SetOAuthURL(_Ini.ReadString(_Section,'OAuthURL',''));
+  Result.SetBySupplierPIDURL(_Ini.ReadString(_Section,'BySupplierPIDURL',''));
+  //Manche Lieferanten drosseln hart. Die Wartezeit aus Retry-After wird bis zu
+  //zwei Minuten mitgegangen, sonst waere die Eingrenzung unten nach wenigen
+  //Anfragen nicht mehr moeglich.
+  Result.SetRetryPolicy(3,120);
+end;
+
 //In ArtNoAsCommatext stehen mehrere Artikelnummern, eine genuegt zur Pruefung
 function FirstArtNo(const _Value : String) : String;
 var
@@ -99,6 +141,8 @@ function ShortMsg(const _Value : String) : String;
 begin
   Result := StringReplace(_Value,#13,' ',[rfReplaceAll]);
   Result := StringReplace(Result,#10,' ',[rfReplaceAll]);
+  while Pos('  ',Result) > 0 do
+    Result := StringReplace(Result,'  ',' ',[rfReplaceAll]);
   Result := Trim(Result);
   if Length(Result) > 300 then
     Result := Copy(Result,1,300)+' ...';
@@ -112,6 +156,129 @@ begin
     Result := 'nein';
 end;
 
+function SendModeAsString(_Value : TOpenMasterdataDataPackagesSendMode) : String;
+begin
+  if _Value = omddpsm_Exploded then
+    Result := 'exploded'
+  else
+    Result := 'pipedelimited';
+end;
+
+//Fasst zusammen, was in der Antwort tatsaechlich angekommen ist. Ein Abruf
+//kann technisch gelingen und trotzdem fast leer sein.
+function SummarizeResult(_Result : TOpenMasterdataAPI_Result) : String;
+
+  procedure Add(const _Text : String);
+  begin
+    if Result <> '' then
+      Result := Result+', ';
+    Result := Result+_Text;
+  end;
+
+begin
+  Result := '';
+  if _Result = nil then
+    exit('nichts');
+
+  if _Result.basic.productShortDescr <> '' then
+    Add('basic')
+  else
+  if _Result.basic.commodityGroupId <> '' then
+    Add('basic ohne Kurztext');
+  if _Result.additional.minOrderQuantity > 0 then
+    Add('additional');
+  if _Result.prices.listPrice.value <> '' then
+    Add('prices');
+  if (_Result.descriptions.productDescr <> '') or
+     (_Result.descriptions.marketingText <> '') then
+    Add('descriptions');
+  if _Result.logistics.packagingUnits.Count > 0 then
+    Add(Format('logistics mit %d Einheiten',[_Result.logistics.packagingUnits.Count]));
+  if _Result.pictures.Count > 0 then
+    Add(Format('%d Bilder',[_Result.pictures.Count]));
+  if _Result.documents.Count > 0 then
+    Add(Format('%d Dokumente',[_Result.documents.Count]));
+  if _Result.sparepartlist.sparepartlistRow.Count > 0 then
+    Add(Format('%d Ersatzteilzeilen',[_Result.sparepartlist.sparepartlistRow.Count]));
+
+  if Result = '' then
+    Result := 'Antwort ohne verwertbare Felder';
+end;
+
+//Ein einzelner Abrufversuch. Meldet zurueck, ob er gelungen ist.
+function Probe(_Ini : TMemIniFile; const _Section,_Label,_ArtNo : String;
+  _Packages : TOpenMasterdataAPI_DataPackages;
+  _SendMode : TOpenMasterdataDataPackagesSendMode) : Boolean;
+var
+  client : IOpenMasterdataApiClient;
+  res : TOpenMasterdataAPI_Result;
+begin
+  Result := false;
+  Write(Format('    %-32s : ',[_Label]));
+  client := CreateClient(_Ini,_Section,_Section+'#probe',_SendMode);
+  res := nil;
+  try
+    try
+      Result := client.GetBySupplierPid(_ArtNo,_Packages,res);
+    except
+      on E:Exception do
+      begin
+        Writeln('Ausnahme '+E.ClassName+' '+ShortMsg(E.Message));
+        exit;
+      end;
+    end;
+    if Result and (res <> nil) then
+      Writeln('ok, '+SummarizeResult(res))
+    else
+      Writeln(Format('Fehler %d %s',[client.GetLastErrorCode,
+        ShortMsg(client.GetLastErrorMessage)]));
+  finally
+    res.Free;
+  end;
+end;
+
+//Sucht die Ursache, wenn die Abfrage aller Datenpakete scheitert.
+procedure NarrowDownFailure(_Ini : TMemIniFile; const _Section,_ArtNo : String;
+  _SendMode : TOpenMasterdataDataPackagesSendMode);
+var
+  otherMode : TOpenMasterdataDataPackagesSendMode;
+  package : TOpenMasterdataAPI_DataPackage;
+  failing : String;
+begin
+  Writeln('  EINGRENZUNG');
+
+  //Zuerst der andere Sendemodus: versteht der Lieferant die Paketliste nicht,
+  //scheitert jede Abfrage mit mehr als einem Paket.
+  if _SendMode = omddpsm_PipeDelimited then
+    otherMode := omddpsm_Exploded
+  else
+    otherMode := omddpsm_PipeDelimited;
+
+  if Probe(_Ini,_Section,'alle Pakete, '+SendModeAsString(otherMode),_ArtNo,
+       TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,otherMode) then
+  begin
+    Writeln('    -> DataPackageSendMode='+SendModeAsString(otherMode)+' eintragen');
+    exit;
+  end;
+
+  //Sonst einzeln pruefen, welches Paket der Server nicht liefern kann
+  failing := '';
+  for package := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+    if not Probe(_Ini,_Section,
+         'nur '+TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(package),
+         _ArtNo,[package],_SendMode) then
+    begin
+      if failing <> '' then
+        failing := failing+', ';
+      failing := failing+TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(package);
+    end;
+
+  if failing = '' then
+    Writeln('    -> einzeln geht jedes Paket, der Server vertraegt nur die Kombination nicht')
+  else
+    Writeln('    -> Fehler bei: '+failing);
+end;
+
 var
   configurationFilename : String;
   ini : TMemIniFile;
@@ -119,7 +286,6 @@ var
   section,artNo,token,oauthResponse : String;
   client : IOpenMasterdataApiClient;
   res : TOpenMasterdataAPI_Result;
-  grantType : TOpenMasterdataGrantType;
   sendMode : TOpenMasterdataDataPackagesSendMode;
   dataReceived : Boolean;
   countLoginOk,countDataOk,countTotal : Integer;
@@ -153,21 +319,13 @@ begin
       Writeln('');
       Writeln('=== '+section);
 
-      grantType := TOpenMasterdataApiClient.GetGrantTypeFromString(
-                     ini.ReadString(section,'GrantType',''));
       sendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(
-                     ini.ReadString(section,'DataPackageSendMode',''));
+                    ini.ReadString(section,'DataPackageSendMode',''));
 
-      //Zur Fehlersuche laesst sich der Grant-Type uebersteuern, ohne die
-      //Konfiguration zu aendern
-      if SameText(ParamStr(2),'cc') then
-        grantType := omdgt_ClientCredentials
-      else
-      if SameText(ParamStr(2),'pw') then
-        grantType := omdgt_Password;
-
-      Writeln('  GrantType         : '+IfThen(grantType = omdgt_ClientCredentials,
-                                              'client_credentials','password'));
+      Writeln('  Konfiguration     : '+
+              IfThen(ConfiguredGrantType(ini,section) = omdgt_ClientCredentials,
+                     'client_credentials','password')+
+              ', '+SendModeAsString(sendMode));
       Writeln('  gesetzt           : Benutzer '+YesNo(ini.ReadString(section,'Username','') <> '')+
               ', Kundennummer '+YesNo(ConfiguredCustomerNumber(ini,section) <> '')+
               ', Passwort '+YesNo(ini.ReadString(section,'Password','') <> '')+
@@ -182,26 +340,13 @@ begin
         continue;
       end;
 
-      //Eine bestehende Verbindung gleichen Namens wuerde die Zugangsdaten
-      //aus einem frueheren Durchlauf weiterverwenden
-      client := nil;
-      TOpenMasterdataApiClient.RemoveOpenMasterdataConnection(section);
-      client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(section,
-                  ini.ReadString(section,'Username',''),
-                  ini.ReadString(section,'Password',''),
-                  ConfiguredCustomerNumber(ini,section),
-                  ini.ReadString(section,'ClientID',''),
-                  ini.ReadString(section,'ClientSecret',''),
-                  ini.ReadString(section,'ClientScope',''),grantType,sendMode);
-      client.SetOAuthURL(ini.ReadString(section,'OAuthURL',''));
-      client.SetBySupplierPIDURL(ini.ReadString(section,'BySupplierPIDURL',''));
-      //Fuer die Diagnose ohne Wiederholungen, sonst dauert ein Ausfall lange
-      client.SetRetryPolicy(0,0);
+      client := CreateClient(ini,section,section,sendMode);
 
       res := nil;
       dataReceived := false;
       try
-        dataReceived := client.GetBySupplierPid(artNo,[omd_datapackage_basic],res);
+        dataReceived := client.GetBySupplierPid(artNo,
+                          TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,res);
       except
         on E:Exception do
           Writeln('  AUSNAHME          : '+E.ClassName+' '+ShortMsg(E.Message));
@@ -226,12 +371,16 @@ begin
         begin
           Inc(countDataOk);
           Writeln('  ARTIKEL '+artNo+' : ok, '+res.basic.productShortDescr);
+          Writeln('    eingelesen      : '+SummarizeResult(res));
         end
         else
         begin
           Writeln('  ARTIKEL '+artNo+' : kein Ergebnis');
           Writeln('    HTTP-Code       : '+IntToStr(client.GetLastErrorCode));
           Writeln('    Meldung         : '+ShortMsg(client.GetLastErrorMessage));
+          //Ohne Login ist jede weitere Abfrage sinnlos
+          if token <> '' then
+            NarrowDownFailure(ini,section,artNo,sendMode);
         end;
       finally
         res.Free;
@@ -245,7 +394,7 @@ begin
 
     //Ein nicht mehr gueltiger Zugang ist ein Befund, kein Programmfehler.
     //Der Rueckgabewert erlaubt trotzdem eine Auswertung im Skript.
-    if countLoginOk < countTotal then
+    if (countLoginOk < countTotal) or (countDataOk < countTotal) then
       ExitCode := 1;
   finally
     sections.Free;

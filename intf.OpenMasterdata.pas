@@ -253,7 +253,9 @@ begin
   Result := NormalizeSingleLine(Result);
 end;
 
-function OAuthResponsePreview(const _Content : String) : String;
+//Bereitet einen Antwortkoerper fuer eine Fehlermeldung auf: ohne Markup,
+//einzeilig und gekuerzt.
+function ResponsePreview(const _Content : String) : String;
 begin
   Result := StripHtmlTags(_Content);
   if Result = '' then
@@ -266,6 +268,22 @@ end;
 //Token liefern. RFC 6749 Abschnitt 5.2 sieht dafuer error und
 //error_description vor. Deren Text nennt den Grund und ist fuer die
 //Fehlersuche weit brauchbarer als der Hinweis, die Antwort sei kein JSON.
+//Der Antwortkoerper nennt oft den eigentlichen Grund, etwa welches Feld der
+//Server nicht schreiben konnte. Ohne ihn bleibt nur der nackte Statuscode.
+function AppendResponseDetail(const _Message,_Content : String) : String;
+var
+  detail : String;
+begin
+  Result := _Message;
+  detail := ResponsePreview(_Content);
+  if detail = '' then
+    exit;
+  //Nicht wiederholen, was schon in der Meldung steht
+  if Pos(detail,_Message) > 0 then
+    exit;
+  Result := Trim(_Message+' '+detail);
+end;
+
 function OAuthJsonErrorMessage(const _Content : String) : String;
 var
   trimmedContent,errorCode,errorDescr : String;
@@ -277,7 +295,7 @@ begin
     exit('OAuth response is empty.');
 
   if trimmedContent[1] = '<' then
-    exit('OAuth response is HTML instead of JSON: ' + OAuthResponsePreview(trimmedContent));
+    exit('OAuth response is HTML instead of JSON: ' + ResponsePreview(trimmedContent));
 
   try
     jsonValue := TJSONObject.ParseJSONValue(trimmedContent);
@@ -308,13 +326,13 @@ begin
       end;
 
       //Gueltiges JSON, aber ohne Token und ohne Fehlerfeld
-      exit('OAuth response contains no access_token: ' + OAuthResponsePreview(trimmedContent));
+      exit('OAuth response contains no access_token: ' + ResponsePreview(trimmedContent));
     end;
   finally
     jsonValue.Free;
   end;
 
-  Result := 'OAuth response is not valid JSON: ' + OAuthResponsePreview(trimmedContent);
+  Result := 'OAuth response is not valid JSON: ' + ResponsePreview(trimmedContent);
 end;
 
 function TryLoadAuthResult(const _Content : String; out _AuthResult : TOpenMasterdataAPI_AuthResult;
@@ -1118,7 +1136,9 @@ begin
             (RESTResponse.StatusCode = COpenMasterdataStatusAlternativeProduct) or
             (RESTResponse.StatusCode = COpenMasterdataStatusSuccessorProduct)) then
     begin
-      FLastErrorMessage := StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText);
+      FLastErrorMessage := AppendResponseDetail(
+        StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText),
+        RESTResponse.Content);
       FLastBySupplierPIDResponseContent := RESTResponse.Content;
       exit;
     end;
@@ -1230,6 +1250,8 @@ begin
       end
       else
       begin
+        //Der Antwortkoerper steht hier schon im Zielpuffer des Downloads und
+        //ist deshalb nicht mehr als Meldung verwertbar
         FLastErrorMessage := StatusCodeToMessage(lResponse.StatusCode,lResponse.StatusText);
         //Ein zurueckgezogener Token muss auch hier verworfen werden
         if (lResponse.StatusCode = 401) or (lResponse.StatusCode = 403) then
