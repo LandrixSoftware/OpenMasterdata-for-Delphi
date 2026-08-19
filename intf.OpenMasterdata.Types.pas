@@ -28,7 +28,7 @@ interface
 
 uses
   System.Classes,System.SysUtils,System.IOUtils,DateUtils,System.StrUtils
-  ,System.Generics.Collections,System.Generics.Defaults
+  ,System.Generics.Collections,System.Generics.Defaults,System.RegularExpressions
   ,System.Json,REST.Json
   ;
 
@@ -97,6 +97,7 @@ type
     Furl: String;
     Fdescription: String;
     FsortOrder: Integer;
+    Flanguage: String;
   public
     property url : String read Furl write Furl;
     property urlThumbnail : String read FurlThumbnail write FurlThumbnail;
@@ -106,6 +107,7 @@ type
     property size : Integer read Fsize write Fsize; //Dokumentgröße in Byte
     property filename : String read Ffilename write Ffilename; //max 256 Dateiname
     property hash : String read Fhash write Fhash;
+    property language : String read Flanguage write Flanguage; //Sprache(n) des Dokuments, bei mehreren kommagetrennt
   end;
 
   TOpenMasterdataAPI_DocumentList = class(TObjectList<TOpenMasterdataAPI_Document>)
@@ -342,6 +344,7 @@ type
       omdPackageType_PLA,//PLA = Platte
       omdPackageType_CI, //CI = Kanister
       omdPackageType_GEB,//GEB = Gebinde
+      omdPackageType_PMS,//PMS = in der Spec 9.0.0 ohne Beschreibung gelistet
       omdPackageType_Unknown
     );
 
@@ -569,6 +572,7 @@ type
     rawMaterial_W,  //Wolfram
     rawMaterial_ZN, //Zink
     rawMaterial_SN,  //Zinn
+    rawMaterial_MK, //in der Spec 9.0.0 ohne Beschreibung gelistet
     rawMaterial_Unknown
     );
 
@@ -700,6 +704,8 @@ type
   TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
   public
     procedure LoadFromJson(const _JsonValue : String);
+    //Wie LoadFromJson, meldet aber zurueck ob die Antwort ueberhaupt als JSON-Objekt lesbar war
+    function TryLoadFromJson(const _JsonValue : String; out _Error : String) : Boolean;
   end;
 
   TOpenMasterdataHelper = class
@@ -865,15 +871,24 @@ end;
 
 procedure TOpenMasterdataAPI_ResultHelper.LoadFromJson(const _JsonValue: String);
 var
+  errorMessage : String;
+begin
+  if not TryLoadFromJson(_JsonValue,errorMessage) then
+    raise Exception.Create(errorMessage);
+end;
+
+function TOpenMasterdataAPI_ResultHelper.TryLoadFromJson(const _JsonValue: String;
+  out _Error: String): Boolean;
+var
   messageJson:      TJSONValue;
 
   jsonString  : TJSONString;
   jsonNumber : TJSONNumber;
-  jsonArray : TJSONArray;
+  jsonArray,jsonArray2 : TJSONArray;
   jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
   valueAsString : String;
-  boolValue : Boolean;
+  intValue : Integer;
 
   itemSparepartlistRow : TOpenMasterdataAPI_SparepartlistRow;
 
@@ -882,24 +897,32 @@ var
     Result := TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,_Value);
   end;
 
-  function TryGetBoolean(_Json : TJSONValue; const _Name : String; out _Value : Boolean) : Boolean;
+  //Zahlfelder kommen je nach Lieferant als JSON-Zahl oder als String
+  function TryGetInt(_Json : TJSONValue; const _Name : String; out _Value : Integer) : Boolean;
+  var
+    scalarValue : String;
   begin
-    Result := TOpenMasterdataAPIHelper.JSONTryGetBoolean(_Json,_Name,_Value);
+    _Value := 0;
+    Result := TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,scalarValue);
+    if Result then
+      _Value := StrToIntDef(Trim(scalarValue),0);
   end;
 
   procedure LoadPriceFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
+  var
+    scalarValue : String; //lokal, damit die Variablen des Aufrufers nicht ueberschrieben werden
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
 
-    if TryGetString(_Val,'value',valueAsString) then
-      _Result.value := valueAsString;
-    if TryGetString(_Val,'currency',valueAsString) then
-      _Result.currency := valueAsString;
-    if TryGetString(_Val,'basis',valueAsString) then
-      _Result.basis := StrToIntDef(valueAsString,1);
-    if TryGetString(_Val,'quantityUnit',valueAsString) then
-      _Result.quantityUnit := valueAsString;
+    if TryGetString(_Val,'value',scalarValue) then
+      _Result.value := scalarValue;
+    if TryGetString(_Val,'currency',scalarValue) then
+      _Result.currency := scalarValue;
+    if TryGetString(_Val,'basis',scalarValue) then
+      _Result.basis := StrToIntDef(scalarValue,1);
+    if TryGetString(_Val,'quantityUnit',scalarValue) then
+      _Result.quantityUnit := scalarValue;
   end;
 
   procedure LoadPriceOrFirstArrayItemFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
@@ -948,15 +971,17 @@ var
 
   procedure LoadMeasureByNameFromJson(_Val : TJSONValue; const _PrimaryName, _SecondaryName : String;
     _Result : TOpenMasterdataAPI_LogisticsMeasure);
+  var
+    measureValue : TJSONValue; //lokal, damit die Laufvariable des Aufrufers nicht ueberschrieben wird
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
 
-    if (_PrimaryName <> '') and _Val.TryGetValue<TJSONValue>(_PrimaryName,jsonValue2) then
-      LoadMeasureUnitFromJson(jsonValue2,_Result)
+    if (_PrimaryName <> '') and _Val.TryGetValue<TJSONValue>(_PrimaryName,measureValue) then
+      LoadMeasureUnitFromJson(measureValue,_Result)
     else
-    if (_SecondaryName <> '') and _Val.TryGetValue<TJSONValue>(_SecondaryName,jsonValue2) then
-      LoadMeasureUnitFromJson(jsonValue2,_Result);
+    if (_SecondaryName <> '') and _Val.TryGetValue<TJSONValue>(_SecondaryName,measureValue) then
+      LoadMeasureUnitFromJson(measureValue,_Result);
   end;
 
   procedure LoadWeightFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LogisticsWeight);
@@ -1071,14 +1096,48 @@ var
   end;
 
 begin
-  messageJson := TJSONObject.ParseJSONValue(
-       TOpenMasterdataHelper.FixJson(_JsonValue),
-       false,true) as TJSONValue;
-
-  if messageJson = nil then
-    exit;
+  Result := false;
+  _Error := '';
 
   try
+    messageJson := TJSONObject.ParseJSONValue(
+         TOpenMasterdataHelper.FixJson(_JsonValue),
+         false,true) as TJSONValue;
+  except
+    on E:Exception do
+    begin
+      _Error := E.ClassName+' '+E.Message;
+      exit;
+    end;
+  end;
+
+  //Nur ein JSON-Objekt ist eine verwertbare Produktantwort. null, [] oder ein Skalar nicht.
+  if not (messageJson is TJSONObject) then
+  begin
+    if messageJson = nil then
+      _Error := 'Die Antwort enthaelt kein JSON.'
+    else
+    begin
+      _Error := 'Die Antwort ist kein JSON-Objekt.';
+      messageJson.Free;
+    end;
+    exit;
+  end;
+
+  try
+    //Mehrfachaufruf darf keine Eintraege anhaengen
+    pictures.Clear;
+    documents.Clear;
+    additional.alternativeProduct.Clear;
+    additional.followupProduct.Clear;
+    additional.accessories.Clear;
+    additional.sets.Clear;
+    additional.attribute.Clear;
+    logistics.packagingUnits.Clear;
+    prices.rawMaterial.Clear;
+    prices.linePrice.Clear;
+    sparepartlist.sparepartlistRow.Clear;
+
     if TryGetString(messageJson,'supplierPid',valueAsString) then
       supplierPid := valueAsString;
     if TryGetString(messageJson,'manufacturerId',valueAsString) then
@@ -1132,7 +1191,11 @@ begin
         prices.linePrice.Add(itemLinePrice);
 
         LoadPriceFromJson(jsonValue2,itemLinePrice);
+        //Die Spec 9.0.0 schreibt das Feld als 'descriptiion', deshalb beide Schreibweisen
         if TryGetString(jsonValue2,'description',valueAsString) then
+          itemLinePrice.description := valueAsString
+        else
+        if TryGetString(jsonValue2,'descriptiion',valueAsString) then
           itemLinePrice.description := valueAsString;
       end;
     end;
@@ -1208,20 +1271,16 @@ begin
       additional.expiringProductState := '';
       if TryGetString(jsonValue,'expiringProduct',valueAsString) then
       begin
-        additional.expiringProductState := valueAsString;
-        additional.expiringProduct := SameText(valueAsString,'yes')
-          or SameText(valueAsString,'true')
-          or StartsText('yes',valueAsString);
-        additional.expiringProductHasSuccessor := ContainsText(valueAsString,'successor');
-      end
-      else
-      if TryGetBoolean(jsonValue,'expiringProduct',boolValue) then
-      begin
-        additional.expiringProduct := boolValue;
-        if boolValue then
-          additional.expiringProductState := 'Yes'
+        //Kommt je nach Lieferant als String (No/Yes/Yes-Successor) oder als JSON-Boolean.
+        //TryGetString liefert auch fuer TJSONBool einen Wert, daher hier normalisieren.
+        if SameText(valueAsString,'true') then
+          valueAsString := 'Yes'
         else
-          additional.expiringProductState := 'No';
+        if SameText(valueAsString,'false') then
+          valueAsString := 'No';
+        additional.expiringProductState := valueAsString;
+        additional.expiringProduct := StartsText('yes',valueAsString);
+        additional.expiringProductHasSuccessor := ContainsText(valueAsString,'successor');
       end;
       if TryGetString(jsonValue,'expiringDate',valueAsString) then
         additional.expiringDate := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
@@ -1270,7 +1329,10 @@ begin
         if TryGetString(jsonValue2,'amount',valueAsString) then
           itemSet.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
       end;
-      if jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
+      //Einzelne Lieferanten (z.B. GC-Gruppe) liefern den Schluessel im Plural
+      if not jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
+        jsonValue.TryGetValue<TJSONArray>('attributes',jsonArray);
+      if Assigned(jsonArray) then
       for jsonValue2 in jsonArray do
       begin
         var itemAttribute : TOpenMasterdataAPI_Attribute := TOpenMasterdataAPI_Attribute.Create;
@@ -1353,20 +1415,24 @@ begin
       LoadMeasureByNameFromJson(jsonValue,'measureC','height',logistics.measureC);
       if (logistics.measureC.measure = '') and (logistics.measureC.unit_ = '') then
         LoadMeasureByNameFromJson(jsonValue,'','heigth',logistics.measureC);
+      //Die Spec 9.0.0 schreibt das Feld in Logistics als 'weigth', reale Responses nutzen 'weight'
       if jsonValue.TryGetValue<TJSONValue>('weight',jsonValue2) then
+        LoadWeightFromJson(jsonValue2,logistics.weight)
+      else
+      if jsonValue.TryGetValue<TJSONValue>('weigth',jsonValue2) then
         LoadWeightFromJson(jsonValue2,logistics.weight);
-      if jsonValue.TryGetValue<TJSONValue>('unNumber',jsonValue2) then
-        logistics.unNumber := jsonValue2.Value;
-      if jsonValue.TryGetValue<TJSONValue>('dangerClass',jsonValue2) then
-        logistics.dangerClass := jsonValue2.Value;
+      if TryGetString(jsonValue,'unNumber',valueAsString) then
+        logistics.unNumber := valueAsString;
+      if TryGetString(jsonValue,'dangerClass',valueAsString) then
+        logistics.dangerClass := valueAsString;
       if TryGetString(jsonValue,'carryingCategory',valueAsString) then
         logistics.carryingCategory := CarryingCategoryFromString(valueAsString);
       if jsonValue.TryGetValue<TJSONBool>('ubaListRelevant',jsonBool) then
         logistics.ubaListRelevant := jsonBool.AsBoolean;
       if jsonValue.TryGetValue<TJSONBool>('ubaListConform',jsonBool) then
         logistics.ubaListConform := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONValue>('weeeNumber',jsonValue2) then
-        logistics.weeeNumber := jsonValue2.Value;
+      if TryGetString(jsonValue,'weeeNumber',valueAsString) then
+        logistics.weeeNumber := valueAsString;
       if TryGetString(jsonValue,'packagingQuantity',valueAsString) then
         logistics.packagingQuantity := StrToIntDef(valueAsString,0);
       if jsonValue.TryGetValue<TJSONArray>('packagingUnits',jsonArray) then
@@ -1429,26 +1495,26 @@ begin
       var itemPicture : TOpenMasterdataAPI_Picture := TOpenMasterdataAPI_Picture.Create;
       pictures.Add(itemPicture);
 
-      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-        itemPicture.url := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('urlThumbnail',jsonString) then
-        itemPicture.urlThumbnail := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-        itemPicture.type_ := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('use',jsonString) then
-        itemPicture.use := jsonString.Value;
+      if TryGetString(jsonValue,'url',valueAsString) then
+        itemPicture.url := valueAsString;
+      if TryGetString(jsonValue,'urlThumbnail',valueAsString) then
+        itemPicture.urlThumbnail := valueAsString;
+      if TryGetString(jsonValue,'type',valueAsString) then
+        itemPicture.type_ := valueAsString;
+      if TryGetString(jsonValue,'use',valueAsString) then
+        itemPicture.use := valueAsString;
       if jsonValue.TryGetValue<TJSONBool>('substituteId',jsonBool) then
         itemPicture.substituteId := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-        itemPicture.description := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-        itemPicture.sortOrder := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONNumber>('size',jsonNumber) then
-        itemPicture.size := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-        itemPicture.filename := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-        itemPicture.hash := jsonString.Value;
+      if TryGetString(jsonValue,'description',valueAsString) then
+        itemPicture.description := valueAsString;
+      if TryGetInt(jsonValue,'sortOrder',intValue) then
+        itemPicture.sortOrder := intValue;
+      if TryGetInt(jsonValue,'size',intValue) then
+        itemPicture.size := intValue;
+      if TryGetString(jsonValue,'filename',valueAsString) then
+        itemPicture.filename := valueAsString;
+      if TryGetString(jsonValue,'hash',valueAsString) then
+        itemPicture.hash := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONArray>('documents',jsonArray) then
     for jsonValue in jsonArray do
@@ -1456,23 +1522,30 @@ begin
       var itemDocument : TOpenMasterdataAPI_Document := TOpenMasterdataAPI_Document.Create;
       documents.Add(itemDocument);
 
-      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-        itemDocument.url := jsonString.Value;
+      if TryGetString(jsonValue,'url',valueAsString) then
+        itemDocument.url := valueAsString;
       if TryGetString(jsonValue,'urlThumbnail',valueAsString) then
         itemDocument.urlThumbnail := valueAsString;
-      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-        itemDocument.type_ := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-        itemDocument.description := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-        itemDocument.sortOrder := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONValue>('size',jsonValue3) then
-        itemDocument.size := StrToIntDef(jsonValue3.Value,0);
-      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-        itemDocument.filename := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-        itemDocument.hash := jsonString.Value;
+      if TryGetString(jsonValue,'type',valueAsString) then
+        itemDocument.type_ := valueAsString;
+      if TryGetString(jsonValue,'description',valueAsString) then
+        itemDocument.description := valueAsString;
+      if TryGetInt(jsonValue,'sortOrder',intValue) then
+        itemDocument.sortOrder := intValue;
+      if TryGetInt(jsonValue,'size',intValue) then
+        itemDocument.size := intValue;
+      if TryGetString(jsonValue,'filename',valueAsString) then
+        itemDocument.filename := valueAsString;
+      if TryGetString(jsonValue,'hash',valueAsString) then
+        itemDocument.hash := valueAsString;
+      //Spec 9.0.0: language ist ein Array von Sprachcodes, einzelne Lieferanten liefern einen String
+      if jsonValue.TryGetValue<TJSONArray>('language',jsonArray2) then
+        itemDocument.language := JsonArrayToDelimitedString(jsonArray2)
+      else
+      if TryGetString(jsonValue,'language',valueAsString) then
+        itemDocument.language := valueAsString;
     end;
+    Result := true;
   finally
     messageJson.Free;
   end;
@@ -1497,6 +1570,7 @@ function TOpenMasterdataAPI_PriceHelper.ValueAsCurrency: Currency;
 var
   fs : TFormatSettings;
 begin
+  fs := TFormatSettings.Invariant; //vollstaendig initialisieren, nicht nur einzelne Felder setzen
   fs.ThousandSeparator := ',';
   fs.DecimalSeparator := '.';
   Result := StrToCurrDef(value,0,fs);
@@ -1519,6 +1593,7 @@ begin
     exit;
   if (Length(_Val) = 8) and (Pos('-',_Val) = 0) then
   begin
+    //YYYYMMDD
     yearPart := StrToIntDef(Copy(_Val,1,4),0);
     monthPart := StrToIntDef(Copy(_Val,5,2),0);
     dayPart := StrToIntDef(Copy(_Val,7,2),0);
@@ -1527,7 +1602,16 @@ begin
       Result := DateOf(parsedDate);
       exit;
     end;
-    exit;
+    //DDMMYYYY, kommt z.B. von Sanitaer-Heinze
+    yearPart := StrToIntDef(Copy(_Val,5,4),0);
+    monthPart := StrToIntDef(Copy(_Val,3,2),0);
+    dayPart := StrToIntDef(Copy(_Val,1,2),0);
+    if TryEncodeDate(yearPart,monthPart,dayPart,parsedDate) then
+    begin
+      Result := DateOf(parsedDate);
+      exit;
+    end;
+    //kein bekanntes 8-stelliges Format, weiter mit den allgemeinen Fallbacks
   end;
   if TryISO8601ToDate(_Val,isoDate,false) then
   begin
@@ -1543,6 +1627,7 @@ class function TOpenMasterdataAPIHelper.JSONStrToFloat(_Val: String): double;
 var
   fs : TFormatSettings;
 begin
+  fs := TFormatSettings.Invariant; //vollstaendig initialisieren, nicht nur einzelne Felder setzen
   fs.ThousandSeparator := ',';
   fs.DecimalSeparator := '.';
   Result := StrToFloatDef(_Val,0,fs);
@@ -1583,6 +1668,9 @@ begin
   _Value := '';
   if (_Json = nil) or (not _Json.TryGetValue<TJSONValue>(_Name,jsonValue)) then
     exit;
+  //JSON null liefert ueber TJSONNull.Value den Literalstring 'null' - als "nicht vorhanden" behandeln
+  if jsonValue is TJSONNull then
+    exit;
   _Value := jsonValue.Value;
   Result := true;
 end;
@@ -1611,10 +1699,14 @@ end;
 class function TOpenMasterdataHelper.FixJson(const _JsonValue: String): String;
 begin
   //JSON-Korrektur
-  //Ungültiges JSON Wiedemann
+  //Einzelne Lieferanten (z.B. Wiedemann) liefern die GTIN als Zahl mit fuehrender Null.
+  //Das ist kein gueltiges JSON. Der Wert wird deshalb in einen String umgewandelt,
+  //damit die fuehrende Null erhalten bleibt.
+  //Eine alleinstehende 0 bleibt unangetastet, sie ist gueltiges JSON.
   Result := _JsonValue;
-  if Pos('"gtin": 0',Result)>0 then
-    Result := ReplaceText(Result,'"gtin": 0','"gtin": ');
+  if not ContainsText(Result,'"gtin"') then
+    exit;
+  Result := TRegEx.Replace(Result,'("gtin"\s*:\s*)(0\d+)','$1"$2"');
 end;
 
 { TOpenMasterdataAPI_PackageTypeHelper }
@@ -1703,6 +1795,9 @@ begin
   if SameText(_Val,'GEB') then
     Result := omdPackageType_GEB//GEB = Gebinde
   else
+  if SameText(_Val,'PMS') then
+    Result := omdPackageType_PMS
+  else
     Result := omdPackageType_Unknown;
 end;
 
@@ -1737,6 +1832,7 @@ begin
     omdPackageType_PLA: Result := 'PLA';
     omdPackageType_CI: Result := 'CI';
     omdPackageType_GEB: Result := 'GEB';
+    omdPackageType_PMS: Result := 'PMS';
     else Result := '';
   end;
 end;
@@ -1788,6 +1884,9 @@ begin
   if SameText(_Val,'SN') then
     Result := rawMaterial_SN
   else
+  if SameText(_Val,'MK') then
+    Result := rawMaterial_MK
+  else
     Result := rawMaterial_Unknown;
 end;
 
@@ -1809,6 +1908,7 @@ begin
     rawMaterial_W : Result := 'W';
     rawMaterial_ZN: Result := 'ZN';
     rawMaterial_SN: Result := 'SN';
+    rawMaterial_MK: Result := 'MK';
     else Result := '';
   end;
 end;
