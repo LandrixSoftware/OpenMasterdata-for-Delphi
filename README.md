@@ -127,6 +127,8 @@ Weitere Informationen unter
 
 # Lieferanten mit Open Masterdata-Unterstützung
 
+Die Spalten entsprechen den Schlüsseln in `configuration.ini`. `CustomerNumberRequired` entscheidet, ob die Kundennummer Teil der Anmeldung ist: Verlangt ein Lieferant sie, wird sie dem Benutzernamen angehängt — sonst muss sie beim Login außen vor bleiben, andernfalls weist der Server die Zugangsdaten zurück.
+
 | Lieferant | ClientIDRequired | GrantType | DataPackageSendMode | UsernameRequired | CustomerNumberRequired | ClientSecretRequired |
 |----------|----------|----------|----------|----------|----------|----------|
 | MAINMETALL Grosshandelsgesellschaft m.b.H. | ja | password | pipedelimited | ja | nein | nein |

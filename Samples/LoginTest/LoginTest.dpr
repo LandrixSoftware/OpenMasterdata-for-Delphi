@@ -70,6 +70,19 @@ begin
   Result := '';
 end;
 
+//CustomernumberRequired steuert, ob der Lieferant die Kundennummer als Teil
+//der Anmeldung erwartet. Verlangt er sie nicht, darf sie nicht mitgegeben
+//werden: die Bibliothek haengt sie sonst an den Benutzernamen an und der
+//Login schlaegt mit bad_credentials fehl.
+function ConfiguredCustomerNumber(_Ini : TMemIniFile; const _Section : String) : String;
+begin
+  //ReadBool versteht nur 0 und 1, in der Konfiguration steht True bzw. False.
+  //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
+  if not StrToBoolDef(Trim(_Ini.ReadString(_Section,'CustomernumberRequired','True')),true) then
+    exit('');
+  Result := _Ini.ReadString(_Section,'Customernumber','');
+end;
+
 //In ArtNoAsCommatext stehen mehrere Artikelnummern, eine genuegt zur Pruefung
 function FirstArtNo(const _Value : String) : String;
 var
@@ -156,7 +169,7 @@ begin
       Writeln('  GrantType         : '+IfThen(grantType = omdgt_ClientCredentials,
                                               'client_credentials','password'));
       Writeln('  gesetzt           : Benutzer '+YesNo(ini.ReadString(section,'Username','') <> '')+
-              ', Kundennummer '+YesNo(ini.ReadString(section,'Customernumber','') <> '')+
+              ', Kundennummer '+YesNo(ConfiguredCustomerNumber(ini,section) <> '')+
               ', Passwort '+YesNo(ini.ReadString(section,'Password','') <> '')+
               ', ClientSecret '+YesNo(ini.ReadString(section,'ClientSecret','') <> '')+
               ', Scope '+YesNo(ini.ReadString(section,'ClientScope','') <> ''));
@@ -176,7 +189,7 @@ begin
       client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(section,
                   ini.ReadString(section,'Username',''),
                   ini.ReadString(section,'Password',''),
-                  ini.ReadString(section,'Customernumber',''),
+                  ConfiguredCustomerNumber(ini,section),
                   ini.ReadString(section,'ClientID',''),
                   ini.ReadString(section,'ClientSecret',''),
                   ini.ReadString(section,'ClientScope',''),grantType,sendMode);

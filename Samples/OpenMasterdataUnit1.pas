@@ -70,6 +70,10 @@ type
     CurrentAuthorizationPort : Integer;
     //Bereits am WebView registrierte Filter, damit keiner doppelt anfaellt
     RegisteredResourceFilters : TStringList;
+    //Die Kundennummer gehoert nur dann in die Zugangsdaten, wenn der
+    //Lieferant sie verlangt. Sonst haengt die Bibliothek sie an den
+    //Benutzernamen an und der Login schlaegt fehl.
+    function ConfiguredCustomerNumber(const _Section : String) : String;
     procedure SetAuthorizationTarget(const _URL : String);
     function IsAuthorizationTarget(const _RequestUri : String) : Boolean;
   end;
@@ -185,7 +189,7 @@ begin
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
-               Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
+               ConfiguredCustomerNumber(ComboBox1.Text),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
@@ -260,6 +264,19 @@ end;
 //Praefixvergleich reicht hier nicht: "https://api.example" ist auch ein
 //Praefix von "https://api.example.angreifer.tld", und dorthin duerfte der
 //Zugriffstoken niemals gehen.
+function TMainForm.ConfiguredCustomerNumber(const _Section : String) : String;
+begin
+  //CustomernumberRequired steuert, ob der Lieferant die Kundennummer als
+  //Teil der Anmeldung erwartet. Steht in der Konfiguration eine Nummer,
+  //die der Lieferant nicht verlangt, wuerde sie den Benutzernamen
+  //verfaelschen.
+  //ReadBool versteht nur 0 und 1, in der Konfiguration steht True bzw. False.
+  //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
+  if not StrToBoolDef(Trim(Configuration.ReadString(_Section,'CustomernumberRequired','True')),true) then
+    exit('');
+  Result := Configuration.ReadString(_Section,'Customernumber','');
+end;
+
 procedure TMainForm.SetAuthorizationTarget(const _URL : String);
 var
   uri : TURI;
@@ -384,7 +401,7 @@ begin
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
-               Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
+               ConfiguredCustomerNumber(ComboBox1.Text),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
