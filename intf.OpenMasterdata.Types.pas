@@ -32,6 +32,17 @@ uses
   ,System.Json,REST.Json
   ;
 
+const
+  //Statuswerte der Spec 9.0.0. Zu 950 und 951 liefert der Server trotz
+  //Fehlerstatus ein vollstaendiges Produkt, aber eben nicht das angefragte.
+  //Ab OM 11 steht der Wert zusaetzlich als Feld status in der Antwort.
+  COpenMasterdataStatusOk                 = 200;
+  COpenMasterdataStatusNotFound           = 404;
+  COpenMasterdataStatusAlternativeProduct = 950; //Artikel nicht verfuegbar, Alternativartikel im Body
+  COpenMasterdataStatusSuccessorProduct   = 951; //Artikel nicht verfuegbar, Nachfolgeartikel im Body
+  COpenMasterdataStatusAmbiguous          = 952; //mehr als ein Treffer
+  COpenMasterdataStatusInactive           = 960; //Artikel nicht mehr aktiv
+
 type
   TOpenMasterdataAPIHelper = class(TObject)
   public
@@ -789,6 +800,25 @@ type
   public
     procedure LoadFromJson(const _JsonValue : String);
     //Wie LoadFromJson, meldet aber zurueck ob die Antwort ueberhaupt als JSON-Objekt lesbar war
+    function TryLoadFromJson(const _JsonValue : String; out _Error : String) : Boolean;
+
+    //Ein Abruf kann gelingen und trotzdem einen anderen als den angefragten
+    //Artikel liefern. Wer das nicht prueft, zeigt dem Anwender kommentarlos
+    //ein fremdes Produkt.
+    function IsRequestedProduct : Boolean;
+    function IsAlternativeProduct : Boolean;
+    function IsSuccessorProduct : Boolean;
+    function IsInactiveProduct : Boolean;
+    //Kurzer Hinweistext, wenn nicht der angefragte Artikel geliefert wurde
+    function StatusHint : String;
+  end;
+
+  //Antwort einer asynchronen Katalogabfrage: ein Array von Produkten statt
+  //eines einzelnen Objekts. Die Produktstruktur ist dieselbe.
+  TOpenMasterdataAPI_ResultList = class(TObjectList<TOpenMasterdataAPI_Result>)
+  public
+    //Liest sowohl ein Array als auch ein einzelnes Produktobjekt. Ein Server,
+    //der zu einer Sammelabfrage nur einen Treffer hat, darf beides senden.
     function TryLoadFromJson(const _JsonValue : String; out _Error : String) : Boolean;
   end;
 
@@ -1899,6 +1929,144 @@ begin
 end;
 
 { TOpenMasterdataHelper }
+
+{ TOpenMasterdataAPI_ResultHelper }
+
+function TOpenMasterdataAPI_ResultHelper.IsRequestedProduct : Boolean;
+begin
+  //0 bedeutet, dass die Antwort kein Statusfeld fuehrt und die Bibliothek
+  //auch keinen nachgetragen hat. Dann gilt der Treffer als der angefragte.
+  Result := (status = 0) or (status = COpenMasterdataStatusOk);
+end;
+
+function TOpenMasterdataAPI_ResultHelper.IsAlternativeProduct : Boolean;
+begin
+  Result := status = COpenMasterdataStatusAlternativeProduct;
+end;
+
+function TOpenMasterdataAPI_ResultHelper.IsSuccessorProduct : Boolean;
+begin
+  Result := status = COpenMasterdataStatusSuccessorProduct;
+end;
+
+function TOpenMasterdataAPI_ResultHelper.IsInactiveProduct : Boolean;
+begin
+  Result := status = COpenMasterdataStatusInactive;
+end;
+
+function TOpenMasterdataAPI_ResultHelper.StatusHint : String;
+begin
+  case status of
+    COpenMasterdataStatusAlternativeProduct:
+      Result := 'Der angefragte Artikel ist nicht verfuegbar, geliefert wurde ein Alternativartikel.';
+    COpenMasterdataStatusSuccessorProduct:
+      Result := 'Der angefragte Artikel ist nicht verfuegbar, geliefert wurde der Nachfolgeartikel.';
+    COpenMasterdataStatusAmbiguous:
+      Result := 'Die Suche liefert mehr als einen Treffer.';
+    COpenMasterdataStatusInactive:
+      Result := 'Der Artikel ist nicht mehr aktiv.';
+  else
+    Result := '';
+  end;
+end;
+
+{ TOpenMasterdataAPI_ResultList }
+
+function TOpenMasterdataAPI_ResultList.TryLoadFromJson(const _JsonValue: String;
+  out _Error: String): Boolean;
+var
+  jsonValue : TJSONValue;
+  element : TJSONValue;
+  item : TOpenMasterdataAPI_Result;
+  itemError : String;
+  index : Integer;
+begin
+  Result := false;
+  _Error := '';
+  Clear;
+
+  if Trim(_JsonValue) = '' then
+  begin
+    _Error := 'Die Antwort ist leer.';
+    exit;
+  end;
+
+  try
+    jsonValue := TJSONObject.ParseJSONValue(
+                   TOpenMasterdataHelper.FixJson(_JsonValue));
+  except
+    on E:Exception do
+    begin
+      _Error := 'Die Antwort ist kein gueltiges JSON: '+E.Message;
+      exit;
+    end;
+  end;
+
+  if jsonValue = nil then
+  begin
+    _Error := 'Die Antwort ist kein gueltiges JSON.';
+    exit;
+  end;
+
+  try
+    //Ein einzelnes Produkt ist ebenso zulaessig wie eine Liste
+    if jsonValue is TJSONObject then
+    begin
+      item := TOpenMasterdataAPI_Result.Create;
+      try
+        if not item.TryLoadFromJson(_JsonValue,_Error) then
+        begin
+          item.Free;
+          exit;
+        end;
+      except
+        item.Free;
+        raise;
+      end;
+      Add(item);
+      exit(true);
+    end;
+
+    if not (jsonValue is TJSONArray) then
+    begin
+      _Error := 'Die Antwort ist weder ein Produkt noch eine Liste von Produkten.';
+      exit;
+    end;
+
+    index := 0;
+    for element in TJSONArray(jsonValue) do
+    begin
+      Inc(index);
+      if not (element is TJSONObject) then
+      begin
+        //Ein einzelner unbrauchbarer Eintrag darf nicht die ganze Liste
+        //verwerfen, er wird uebergangen und im Fehlertext genannt.
+        _Error := _Error+Format('Eintrag %d ist kein Produkt. ',[index]);
+        continue;
+      end;
+
+      item := TOpenMasterdataAPI_Result.Create;
+      try
+        if item.TryLoadFromJson(element.ToJSON,itemError) then
+          Add(item)
+        else
+        begin
+          _Error := _Error+Format('Eintrag %d: %s ',[index,itemError]);
+          item.Free;
+        end;
+      except
+        item.Free;
+        raise;
+      end;
+    end;
+
+    _Error := Trim(_Error);
+    //Gelesen wurde die Liste, auch wenn einzelne Eintraege fehlerhaft waren
+    Result := true;
+  finally
+    jsonValue.Free;
+  end;
+end;
 
 class function TOpenMasterdataHelper.FixJson(const _JsonValue: String): String;
 begin

@@ -40,6 +40,7 @@ uses
   System.IOUtils,
   System.StrUtils,
   System.DateUtils,
+  System.IniFiles,
   intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
   intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas';
@@ -1144,6 +1145,243 @@ begin
     Pos('invalid_grant',msg) < Pos('Bad credentials',msg),msg);
 end;
 
+//Die Konfiguration aus einer Ini-Datei zu lesen ist jetzt Sache der
+//Bibliothek. Vorher legte jede Anwendung die Schluessel selbst aus, und genau
+//dabei entstanden die Fehler mit der Kundennummer.
+procedure TestConfigurationFromIni;
+var
+  iniFilename : String;
+  ini : TMemIniFile;
+  configuration : TOpenMasterdataConfiguration;
+  unknownNames : TStringList;
+
+  procedure WriteIni(const _Content : String);
+  begin
+    TFile.WriteAllText(iniFilename,_Content,TEncoding.UTF8);
+    FreeAndNil(ini);
+    ini := TMemIniFile.Create(iniFilename,TEncoding.UTF8);
+  end;
+
+begin
+  Writeln('Konfiguration aus einer Ini-Datei');
+
+  iniFilename := TPath.Combine(TPath.GetTempPath,'omd-konfigurationstest.ini');
+  ini := nil;
+  unknownNames := TStringList.Create;
+  try
+    //Vollstaendiger Abschnitt
+    WriteIni('[L]'#13#10+
+             'Username=benutzer'#13#10+
+             'Password=geheim'#13#10+
+             'Customernumber=4711'#13#10+
+             'CustomernumberRequired=True'#13#10+
+             'ClientID=cid'#13#10+
+             'ClientSecret=csecret'#13#10+
+             'ClientScope=openMasterdata'#13#10+
+             'GrantType=client_credentials'#13#10+
+             'DataPackageSendMode=exploded'#13#10+
+             'DataPackages=basic,prices'#13#10+
+             'OAuthURL=https://x/token'#13#10+
+             'BySupplierPIDURL=https://x/pid'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L',unknownNames);
+
+    CheckEqualsStr('Benutzer','benutzer',configuration.Username);
+    CheckEqualsStr('Passwort','geheim',configuration.Password);
+    CheckEqualsStr('Kundennummer','4711',configuration.CustomerNumber);
+    CheckEqualsStr('ClientID','cid',configuration.ClientID);
+    CheckEqualsStr('ClientSecret','csecret',configuration.ClientSecret);
+    CheckEqualsStr('Scope','openMasterdata',configuration.ClientScope);
+    Check('Grant-Type',configuration.GrantType = omdgt_ClientCredentials);
+    Check('Sendemodus',configuration.DataPackagesSendMode = omddpsm_Exploded);
+    Check('Datenpakete',configuration.DataPackages =
+      [omd_datapackage_basic,omd_datapackage_prices]);
+    CheckEqualsStr('OAuthURL','https://x/token',configuration.OAuthURL);
+    CheckEqualsStr('BySupplierPIDURL','https://x/pid',configuration.BySupplierPIDURL);
+
+    //Genau der Fall, der bei Richter+Frenzel den Login brach: eine
+    //Kundennummer, die der Lieferant nicht verlangt
+    WriteIni('[L]'#13#10'Username=b'#13#10'Customernumber=4711'#13#10+
+             'CustomernumberRequired=False'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('Kundennummer bleibt aussen vor','',configuration.CustomerNumber);
+
+    //In der Lieferantentabelle der Dokumentation steht ja und nein
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=nein'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('nein wird verstanden','',configuration.CustomerNumber);
+
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=ja'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('ja wird verstanden','4711',configuration.CustomerNumber);
+
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=0'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('0 wird verstanden','',configuration.CustomerNumber);
+
+    //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('ohne Schluessel wird gesendet','4711',configuration.CustomerNumber);
+
+    //Ein unbrauchbarer Wert darf nicht ins Gegenteil kippen
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=vielleicht'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('unbrauchbarer Wert nimmt die Vorgabe','4711',configuration.CustomerNumber);
+
+    //Vorgaben eines leeren Abschnitts
+    WriteIni('[L]'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    Check('Vorgabe Grant-Type',configuration.GrantType = omdgt_Password);
+    Check('Vorgabe Sendemodus',configuration.DataPackagesSendMode = omddpsm_PipeDelimited);
+    Check('Vorgabe Datenpakete',configuration.DataPackages =
+      TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+    CheckEqualsInt('Vorgabe Wiederholungen',2,configuration.MaxRetries);
+    CheckEqualsInt('Vorgabe Wartezeit',10,configuration.MaxRetryDelaySeconds);
+
+    //Ein Tippfehler bei den Datenpaketen wird gemeldet
+    WriteIni('[L]'#13#10'DataPackages=basic,preise'#13#10);
+    unknownNames.Clear;
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L',unknownNames);
+    Check('bekanntes Paket bleibt',omd_datapackage_basic in configuration.DataPackages);
+    Check('unbekanntes Paket wird gemeldet',unknownNames.IndexOf('preise') >= 0,
+      unknownNames.CommaText);
+
+    //Ohne Ini-Datei duerfen die Vorgaben herauskommen, nicht eine Ausnahme
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(nil,'L');
+    Check('ohne Ini-Datei gelten die Vorgaben',configuration.DataPackages =
+      TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+  finally
+    unknownNames.Free;
+    ini.Free;
+    if TFile.Exists(iniFilename) then
+      TFile.Delete(iniFilename);
+  end;
+end;
+
+//Ein Abruf kann gelingen und trotzdem einen anderen als den angefragten
+//Artikel liefern. Wer das nicht bemerkt, zeigt dem Anwender ein fremdes
+//Produkt.
+procedure TestProductStatus;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Status eines Treffers');
+
+  //Ohne Statusfeld gilt der Treffer als der angefragte
+  res := Parse('{"supplierPid":"1"}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('ohne Status ist es der angefragte Artikel',res.IsRequestedProduct);
+    Check('kein Alternativartikel',not res.IsAlternativeProduct);
+    CheckEqualsStr('kein Hinweis noetig','',res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  //Ab OM 11 steht der Status in der Antwort
+  res := Parse('{"supplierPid":"1","status":950}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('950 ist ein Alternativartikel',res.IsAlternativeProduct);
+    Check('950 ist nicht der angefragte Artikel',not res.IsRequestedProduct);
+    Check('Hinweis nennt den Alternativartikel',
+      ContainsText(res.StatusHint,'Alternativartikel'),res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":951}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('951 ist ein Nachfolgeartikel',res.IsSuccessorProduct);
+    Check('Hinweis nennt den Nachfolgeartikel',
+      ContainsText(res.StatusHint,'Nachfolgeartikel'),res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":960}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('960 ist ein nicht mehr aktiver Artikel',res.IsInactiveProduct);
+    Check('Hinweis nennt den Zustand',ContainsText(res.StatusHint,'nicht mehr aktiv'),
+      res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":200}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('200 ist der angefragte Artikel',res.IsRequestedProduct);
+  finally
+    res.Free;
+  end;
+end;
+
+//Eine asynchrone Katalogantwort enthaelt ein Array von Produkten.
+procedure TestResultList;
+var
+  list : TOpenMasterdataAPI_ResultList;
+  err : String;
+begin
+  Writeln('Katalogantwort mit mehreren Produkten');
+
+  list := TOpenMasterdataAPI_ResultList.Create(true);
+  try
+    //Mehrere Produkte
+    Check('Liste lesbar',list.TryLoadFromJson(
+      '[{"supplierPid":"A","basic":{"productShortDescr":"Erster"}},'+
+      '{"supplierPid":"B","basic":{"productShortDescr":"Zweiter"}}]',err),err);
+    CheckEqualsInt('zwei Produkte',2,list.Count);
+    CheckEqualsStr('erstes Produkt','A',list[0].supplierPid);
+    CheckEqualsStr('zweites Produkt','B',list[1].supplierPid);
+    CheckEqualsStr('Inhalt des zweiten','Zweiter',list[1].basic.productShortDescr);
+
+    //Ein einzelnes Produkt ist ebenfalls zulaessig
+    Check('einzelnes Produkt lesbar',
+      list.TryLoadFromJson('{"supplierPid":"C"}',err),err);
+    CheckEqualsInt('ein Produkt',1,list.Count);
+    CheckEqualsStr('Inhalt','C',list[0].supplierPid);
+
+    //Ein erneutes Laden ersetzt den Inhalt, es haeuft sich nichts an
+    Check('erneutes Laden',list.TryLoadFromJson('[{"supplierPid":"D"}]',err),err);
+    CheckEqualsInt('nur der neue Inhalt',1,list.Count);
+    CheckEqualsStr('neuer Inhalt','D',list[0].supplierPid);
+
+    //Eine leere Liste ist kein Fehler
+    Check('leere Liste lesbar',list.TryLoadFromJson('[]',err),err);
+    CheckEqualsInt('keine Produkte',0,list.Count);
+
+    //Ein unbrauchbarer Eintrag darf nicht die ganze Liste verwerfen
+    Check('Liste mit einem unbrauchbaren Eintrag',
+      list.TryLoadFromJson('[{"supplierPid":"E"},42,{"supplierPid":"F"}]',err));
+    CheckEqualsInt('die brauchbaren Eintraege bleiben',2,list.Count);
+    Check('der unbrauchbare wird genannt',err <> '',err);
+
+    //Was kein JSON ist, wird als Fehler gemeldet
+    Check('unlesbare Antwort',not list.TryLoadFromJson('kein json',err));
+    Check('Fehlertext vorhanden',err <> '');
+    Check('leere Antwort',not list.TryLoadFromJson('',err));
+
+    //Ein Skalar ist weder Produkt noch Liste
+    Check('Skalar wird abgelehnt',not list.TryLoadFromJson('42',err));
+  finally
+    list.Free;
+  end;
+end;
+
 procedure TestDataPackagesFromString;
 var
   packages : TOpenMasterdataAPI_DataPackages;
@@ -1457,6 +1695,12 @@ begin
     TestDataPackageWireFormat;
     Writeln;
     TestErrorMessageHygiene;
+    Writeln;
+    TestConfigurationFromIni;
+    Writeln;
+    TestProductStatus;
+    Writeln;
+    TestResultList;
     Writeln;
 
     if ParamCount > 0 then
