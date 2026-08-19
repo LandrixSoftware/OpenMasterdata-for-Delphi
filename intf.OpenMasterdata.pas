@@ -30,9 +30,17 @@ uses
   System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
   ,System.NetEncoding,System.Net.HttpClient,System.Net.URLClient
-  ,Vcl.StdCtrls,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
+  ,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
   ,intf.OpenMasterdata.Types
   ;
+
+const
+  //Sonderstatus der Open-Masterdata-Spec 9.0.0. Zu 950 und 951 liefert der
+  //Server trotz Fehlerstatus ein vollstaendiges Produkt.
+  COpenMasterdataStatusAlternativeProduct = 950; //Artikel nicht verfuegbar, Alternativartikel im Body
+  COpenMasterdataStatusSuccessorProduct   = 951; //Artikel nicht verfuegbar, Nachfolgeartikel im Body
+  COpenMasterdataStatusAmbiguous          = 952; //mehr als ein Treffer
+  COpenMasterdataStatusInactive           = 960; //Artikel nicht mehr aktiv
 
 type
   IOpenMasterdataApiClient = interface
@@ -46,6 +54,9 @@ type
     procedure SetBySupplierPIDURL(const _URL : String);
     procedure SetByManufacturerDataURL(const _URL : String);
     procedure SetByGTINURL(const _URL : String);
+    //Optionaler Query-Parameter der Spec 9.0.0. Gilt ein Zugang fuer mehrere
+    //Kunden, waehlt customerId den Kunden aus, fuer den die Preise gelten.
+    procedure SetCustomerId(const _CustomerId : String);
 
     function GetData(_Url : String; out _Result : TStream) : Boolean;
 
@@ -66,6 +77,7 @@ type
     FUsername,
     FPassword,
     FCustomerNumber,
+    FCustomerId,
     FClientID,
     FClientSecret,
     FClientScope,
@@ -96,6 +108,10 @@ type
     function LoggedIn: Boolean;
     function Login : Boolean;
     function RefreshLogin : Boolean;
+    function CalculateTokenValidTo(_ExpiresInSeconds : Integer) : TDateTime;
+    function TrySplitEndpointUrl(const _URL : String; out _Resource, _BaseUrl : String) : Boolean;
+    procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
+    class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
       _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource,
@@ -117,6 +133,7 @@ type
     procedure SetBySupplierPIDURL(const _URL : String);
     procedure SetByManufacturerDataURL(const _URL : String);
     procedure SetByGTINURL(const _URL : String);
+    procedure SetCustomerId(const _CustomerId : String);
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
@@ -411,8 +428,58 @@ begin
     if FRefreshToken.IsEmpty then
       Result := Login
     else
+    begin
+      //Schlaegt der Refresh fehl, etwa weil der Server ihn nicht unterstuetzt,
+      //ist ein vollstaendiger Login der richtige Ausweg statt eines Fehlers
       Result := RefreshLogin;
+      if not Result then
+        Result := Login;
+    end;
   end;
+end;
+
+function TOpenMasterdataApiClient.CalculateTokenValidTo(_ExpiresInSeconds: Integer): TDateTime;
+const
+  CDefaultLifetimeSeconds = 3600; //Annahme, wenn der Server keine Laufzeit meldet
+  CSafetyMarginSeconds = 30;
+begin
+  if _ExpiresInSeconds <= 0 then
+    _ExpiresInSeconds := CDefaultLifetimeSeconds;
+  //Der Sicherheitsabstand darf die Laufzeit nicht aufzehren, sonst gilt der
+  //Token sofort als abgelaufen und jede Abfrage loest einen Login aus
+  if _ExpiresInSeconds > CSafetyMarginSeconds*2 then
+    _ExpiresInSeconds := _ExpiresInSeconds - CSafetyMarginSeconds;
+  Result := IncSecond(now,_ExpiresInSeconds);
+end;
+
+class function TOpenMasterdataApiClient.StatusCodeToMessage(_StatusCode: Integer;
+  const _StatusText: String): String;
+begin
+  case _StatusCode of
+    COpenMasterdataStatusAmbiguous:
+      Result := 'Die Suche liefert mehr als einen Treffer.';
+    COpenMasterdataStatusInactive:
+      Result := 'Der Artikel ist nicht mehr aktiv.';
+    401:
+      Result := 'Die Anmeldung wurde abgelehnt oder ist abgelaufen.';
+    403:
+      Result := 'Fuer diesen Zugang ist die Abfrage nicht freigeschaltet.';
+    404:
+      Result := 'Der Artikel wurde nicht gefunden.';
+    429:
+      Result := 'Zu viele Anfragen. Bitte spaeter erneut versuchen.';
+  else
+    Result := '';
+  end;
+
+  if Result = '' then
+    Result := _StatusText
+  else
+  if _StatusText <> '' then
+    Result := Result+' ('+_StatusText+')';
+
+  if Result = '' then
+    Result := 'HTTP-Status '+IntToStr(_StatusCode);
 end;
 
 function TOpenMasterdataApiClient.Login: Boolean;
@@ -458,18 +525,31 @@ begin
     if FClientID <> '' then
       RESTRequest.Params.AddItem('client_id',FClientID);
 
-    if (FUsername <> '') and (FCustomerNumber <> '') then
-      RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
-    else
-    if (FCustomerNumber <> '') then
-      RESTRequest.Params.AddItem('username',FCustomerNumber)
-    else
-      RESTRequest.Params.AddItem('username',FUsername);
-    RESTRequest.Params.AddItem('password',FPassword);
+    //Benutzerdaten gehoeren nur zum Resource-Owner-Password-Flow.
+    //Beim Client-Credentials-Flow weisen strikte Server sie mit 400 zurueck.
+    if FGrantType = omdgt_Password then
+    begin
+      if (FUsername <> '') and (FCustomerNumber <> '') then
+        RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
+      else
+      if (FCustomerNumber <> '') then
+        RESTRequest.Params.AddItem('username',FCustomerNumber)
+      else
+        RESTRequest.Params.AddItem('username',FUsername);
+      RESTRequest.Params.AddItem('password',FPassword);
+    end;
 
     RESTRequest.Response := RESTResponse;
 
-    RESTRequest.Execute;
+    try
+      RESTRequest.Execute;
+    except
+      on E:Exception do
+      begin
+        FLastErrorMessage := E.ClassName+' '+E.Message;
+        exit;
+      end;
+    end;
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
@@ -490,7 +570,7 @@ begin
     try
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
-      FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      FAccessTokenValidTo := CalculateTokenValidTo(itm.expires_in);
       //if RESTResponse.Cookies.Count > 0 then
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
@@ -532,17 +612,35 @@ begin
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
     RESTRequest.Client := FRESTClientOAuth;
     RESTRequest.Resource := FOAuthUrl;
+    //RFC 6749 verlangt POST am Token-Endpunkt. Ohne diese Zeile greift der
+    //Standardwert rmGET und die Zugangsdaten stuenden im Query-String.
+    RESTRequest.Method := rmPOST;
+    RESTRequest.Accept := '*/*';
     RESTRequest.Params.AddItem('grant_type','refresh_token');
+    //client_secret und scope wie beim Login mitsenden, sonst weisen
+    //Confidential-Client-Endpunkte den Refresh mit invalid_client zurueck
+    if not FClientSecret.IsEmpty then
+      RESTRequest.Params.AddItem('client_secret',FClientSecret);
+    if not FClientScope.IsEmpty then
+      RESTRequest.Params.AddItem('scope',FClientScope);
     if FClientID <> '' then
       RESTRequest.Params.AddItem('client_id',FClientID);
     RESTRequest.Params.AddItem('refresh_token',FRefreshToken);
     RESTRequest.Response := RESTResponse;
 
-    RESTRequest.Execute;
+    try
+      RESTRequest.Execute;
+    except
+      on E:Exception do
+      begin
+        FLastErrorMessage := E.ClassName+' '+E.Message;
+        exit;
+      end;
+    end;
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
-      FLastErrorMessage := RESTResponse.StatusText;
+      FLastErrorMessage := RESTResponse.StatusText+' '+RESTResponse.Content;
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
@@ -557,15 +655,18 @@ begin
     end;
 
     try
-      if itm.refresh_token.IsEmpty then
+      if itm.access_token.IsEmpty then
       begin
-        FLastErrorMessage := 'OAuth refresh response does not contain a refresh token.';
+        FLastErrorMessage := 'OAuth refresh response does not contain an access token.';
         exit;
       end;
 
       FAccessToken := itm.access_token;
-      FRefreshToken := itm.refresh_token;
-      FAccessTokenValidTo := IncSecond(FAccessTokenValidTo,itm.expires_in-30);
+      //RFC 6749 Abschnitt 5.1: ein neues Refresh-Token ist optional.
+      //Rotiert der Server nicht, bleibt das bisherige gueltig.
+      if not itm.refresh_token.IsEmpty then
+        FRefreshToken := itm.refresh_token;
+      FAccessTokenValidTo := CalculateTokenValidTo(itm.expires_in);
       //if RESTResponse.Cookies.Count > 0 then
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
@@ -619,6 +720,7 @@ function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClien
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
+  parseError : String;
 begin
   Result := false;
   _Result := nil;
@@ -634,15 +736,22 @@ begin
   FLastErrorCode := 0;
 
   if (_RestClient = nil) or _Resource.IsEmpty then
+  begin
+    FLastErrorMessage := 'Fuer diese Abfrage ist keine URL konfiguriert.';
     exit;
-  if (_IdentifierName1 <> '') and _IdentifierValue1.IsEmpty then
+  end;
+  if ((_IdentifierName1 <> '') and _IdentifierValue1.IsEmpty) or
+     ((_IdentifierName2 <> '') and _IdentifierValue2.IsEmpty) or
+     ((_IdentifierName3 <> '') and _IdentifierValue3.IsEmpty) then
+  begin
+    FLastErrorMessage := 'Die Abfrage enthaelt kein vollstaendiges Suchkriterium.';
     exit;
-  if (_IdentifierName2 <> '') and _IdentifierValue2.IsEmpty then
-    exit;
-  if (_IdentifierName3 <> '') and _IdentifierValue3.IsEmpty then
-    exit;
+  end;
   if _DataPackages = [] then
+  begin
+    FLastErrorMessage := 'Es wurde kein Datenpaket ausgewaehlt.';
     exit;
+  end;
 
   RESTResponse := TRESTResponse.Create(nil);
   RESTRequest := TRESTRequest.Create(nil);
@@ -668,13 +777,39 @@ begin
       RESTRequest.AddParameter(_IdentifierName3,TNetEncoding.URL.Encode(_IdentifierValue3),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     if FDataPackagesSendMode = TDataPackagesSendMode.omddpsm_PipeDelimited then
       RESTRequest.AddParameter('datapackage',TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(_DataPackages),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
+    //Optionaler Parameter der Spec 9.0.0 fuer Zugaenge, die fuer mehrere Kunden gelten
+    if not FCustomerId.IsEmpty then
+      RESTRequest.AddParameter('customerId',TNetEncoding.URL.Encode(FCustomerId),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
-    RESTRequest.Execute;
 
-    if not RESTResponse.Status.SuccessOK_200 then
+    try
+      RESTRequest.Execute;
+    except
+      on E:Exception do
+      begin
+        FLastErrorMessage := E.ClassName+' '+E.Message;
+        exit;
+      end;
+    end;
+
+    FLastErrorCode := RESTResponse.StatusCode;
+
+    //Ein abgelaufener oder zurueckgezogener Token muss verworfen werden,
+    //sonst laufen alle weiteren Abfragen bis zum rechnerischen Ablauf in 401
+    if (RESTResponse.StatusCode = 401) or (RESTResponse.StatusCode = 403) then
     begin
-      FLastErrorMessage := RESTResponse.StatusText;
-      FLastErrorCode := RESTResponse.StatusCode;
+      FAccessToken := '';
+      FAccessTokenValidTo := 0;
+    end;
+
+    //Die Spec 9.0.0 liefert zu 950 und 951 ein vollstaendiges Produkt:
+    //den Alternativ- bzw. Nachfolgeartikel zum nicht verfuegbaren Artikel.
+    if not (RESTResponse.Status.SuccessOK_200 or
+            (RESTResponse.StatusCode = COpenMasterdataStatusAlternativeProduct) or
+            (RESTResponse.StatusCode = COpenMasterdataStatusSuccessorProduct)) then
+    begin
+      FLastErrorMessage := StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText);
+      FLastBySupplierPIDResponseContent := RESTResponse.Content;
       exit;
     end;
 
@@ -682,12 +817,17 @@ begin
 
     _Result := TOpenMasterdataAPI_Result.Create;
     try
-      _Result.LoadFromJson(RESTResponse.Content);
+      if not _Result.TryLoadFromJson(RESTResponse.Content,parseError) then
+      begin
+        FreeAndNil(_Result);
+        FLastErrorMessage := parseError;
+        exit;
+      end;
       Result := true;
     except
       on E:Exception do
       begin
-        _Result.Free;
+        FreeAndNil(_Result);
         FLastErrorMessage := E.ClassName+' '+e.Message;
         exit;
       end;
@@ -709,7 +849,13 @@ end;
 
 function TOpenMasterdataApiClient.GetCurrentAuthorizationToken: String;
 begin
-  Result := FAccessToken;
+  //Der Token wird waehrend eines Requests unter FCS neu gesetzt
+  FCS.Acquire;
+  try
+    Result := FAccessToken;
+  finally
+    FCS.Release;
+  end;
 end;
 
 function TOpenMasterdataApiClient.GetData(_Url: String;
@@ -742,10 +888,21 @@ begin
       with lHttp.Get(_URL,lData,lHeaders) do
       begin
         Result := StatusCode = 200;
+        FLastErrorCode := StatusCode;
         if Result then
         begin
           _Result := lData;
           lData := nil;
+        end
+        else
+        begin
+          FLastErrorMessage := StatusCodeToMessage(StatusCode,StatusText);
+          //Ein zurueckgezogener Token muss auch hier verworfen werden
+          if (StatusCode = 401) or (StatusCode = 403) then
+          begin
+            FAccessToken := '';
+            FAccessTokenValidTo := 0;
+          end;
         end;
       end;
     except
@@ -788,55 +945,86 @@ begin
     Result := _Default;
 end;
 
-procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
-  const _URL : String);
+function TOpenMasterdataApiClient.TrySplitEndpointUrl(const _URL: String;
+  out _Resource, _BaseUrl: String): Boolean;
 var
   lUrl : TURI;
 begin
-  lUrl := TURI.Create(_URL);
-  FBySupplierPIDUrl := lUrl.Path;
-  FRESTClientBySupplierPID.BaseURL := BuildRestBaseUrl(lUrl);
-  FRESTClientBySupplierPID.Accept  := 'application/json';
-  FRESTClientBySupplierPID.AcceptCharSet := 'UTF-8';
-  FRESTClientBySupplierPID.ContentType   := 'application/json';
-  FRESTClientBySupplierPID.HandleRedirects := true;
+  Result := false;
+  _Resource := '';
+  _BaseUrl := '';
+
+  //Ein leerer Eintrag in der Konfiguration schaltet den Endpunkt ab und darf
+  //keine Exception ausloesen. TURI.Create wirft bei leerem oder schemalosem Wert.
+  if Trim(_URL) = '' then
+    exit;
+  try
+    lUrl := TURI.Create(_URL);
+  except
+    on E:Exception do
+      exit;
+  end;
+
+  _Resource := lUrl.Path;
+  //Query-Parameter der konfigurierten URL muessen erhalten bleiben, etwa ein
+  //Mandanten- oder Versionsparameter. Weitere Parameter haengt die REST-Klasse
+  //korrekt mit & an.
+  if lUrl.Query <> '' then
+    _Resource := _Resource + '?' + lUrl.Query;
+  _BaseUrl := BuildRestBaseUrl(lUrl);
+  Result := true;
+end;
+
+procedure TOpenMasterdataApiClient.SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
+begin
+  _RestClient.BaseURL := _BaseUrl;
+  _RestClient.Accept := 'application/json';
+  _RestClient.AcceptCharSet := 'UTF-8';
+  _RestClient.ContentType := 'application/json';
+  _RestClient.HandleRedirects := true;
+end;
+
+procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
+  const _URL : String);
+var
+  baseUrl : String;
+begin
+  if TrySplitEndpointUrl(_URL,FBySupplierPIDUrl,baseUrl) then
+    SetupProductRestClient(FRESTClientBySupplierPID,baseUrl);
 end;
 
 procedure TOpenMasterdataApiClient.SetByManufacturerDataURL(const _URL: String);
 var
-  lUrl : TURI;
+  baseUrl : String;
 begin
-  lUrl := TURI.Create(_URL);
-  FByManufacturerDataUrl := lUrl.Path;
-  FRESTClientByManufacturerData.BaseURL := BuildRestBaseUrl(lUrl);
-  FRESTClientByManufacturerData.Accept := 'application/json';
-  FRESTClientByManufacturerData.AcceptCharSet := 'UTF-8';
-  FRESTClientByManufacturerData.ContentType := 'application/json';
-  FRESTClientByManufacturerData.HandleRedirects := true;
+  if TrySplitEndpointUrl(_URL,FByManufacturerDataUrl,baseUrl) then
+    SetupProductRestClient(FRESTClientByManufacturerData,baseUrl);
 end;
 
 procedure TOpenMasterdataApiClient.SetByGTINURL(const _URL: String);
 var
-  lUrl : TURI;
+  baseUrl : String;
 begin
-  lUrl := TURI.Create(_URL);
-  FByGTINUrl := lUrl.Path;
-  FRESTClientByGTIN.BaseURL := BuildRestBaseUrl(lUrl);
-  FRESTClientByGTIN.Accept := 'application/json';
-  FRESTClientByGTIN.AcceptCharSet := 'UTF-8';
-  FRESTClientByGTIN.ContentType := 'application/json';
-  FRESTClientByGTIN.HandleRedirects := true;
+  if TrySplitEndpointUrl(_URL,FByGTINUrl,baseUrl) then
+    SetupProductRestClient(FRESTClientByGTIN,baseUrl);
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
 var
-  lUrl : TURI;
+  baseUrl : String;
 begin
-  lUrl := TURI.Create(_URL);
-  FOAuthUrl := lUrl.Path;
-  if lUrl.Query <> '' then
-    FOAuthUrl := FOAuthUrl + '?' + lUrl.Query;
-  FRESTClientOAuth.BaseURL := BuildRestBaseUrl(lUrl);
+  if TrySplitEndpointUrl(_URL,FOAuthUrl,baseUrl) then
+    FRESTClientOAuth.BaseURL := baseUrl;
+end;
+
+procedure TOpenMasterdataApiClient.SetCustomerId(const _CustomerId: String);
+begin
+  FCS.Acquire;
+  try
+    FCustomerId := _CustomerId;
+  finally
+    FCS.Release;
+  end;
 end;
 
 initialization
