@@ -148,3 +148,18 @@ software distributed under the License is distributed on an
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
+
+## Hinweise zur Aktualisierung bestehender Anwendungen
+
+Zwei Änderungen können bestehenden Code betreffen:
+
+ - Die Objekt- und Listen-Properties der Datentypen sind schreibgeschützt (`read` statt `read/write`), etwa `prices.listPrice`, `logistics.measureA` oder `additional.attribute`. Eine Zuweisung von außen hätte die im Konstruktor erzeugte Instanz lecken lassen. Die Objekte selbst sind unverändert veränderbar, nur das Ersetzen der Instanz entfällt.
+ - Die Aufzählungstypen `TOpenMasterdataAPI_CarryingCategory`, `TOpenMasterdataAPI_PackageType` und `TOpenMasterdataAPI_RawMaterial` haben neue Werte erhalten. Dadurch verschieben sich die Ordinalwerte der bestehenden Einträge. Wer diese Werte als Zahl gespeichert hat, muss die Daten umsetzen. `omdCarryingCategory_None` steht neu an erster Stelle, weil `omdCarryingCategory_0` eine gültige Beförderungskategorie ist und nicht „nicht angegeben" bedeutet.
+
+Geändertes Verhalten bei gleicher Signatur:
+
+ - `LoadFromJson` und `TryLoadFromJson` leeren das Ergebnisobjekt vor jedem Ladevorgang. Ein wiederverwendetes Objekt behält damit keine Werte des zuvor geladenen Artikels mehr.
+ - `NewOpenMasterdataConnection` übernimmt bei bereits bekanntem Verbindungsnamen die übergebenen Zugangsdaten. Weichen sie ab, wird der bisherige Token verworfen.
+ - `GetLastErrorCode` liefert nach einem erfolgreichen Abruf 0. Bei den Sonderstatus 950 und 951 bleibt der Statuscode erhalten, obwohl der Abruf als erfolgreich gilt.
+ - `AsHtml` reicht Lieferanten-HTML nicht mehr unverändert durch. Nicht freigegebene Tags und sämtliche Attribute werden entfernt, Adressen nur mit den Schemata `http`, `https` und `mailto` verlinkt.
+ - Fehlgeschlagene Bild- und Dokumentdownloads werden nicht mehr zwischengespeichert, sondern beim nächsten Zugriff erneut versucht.
