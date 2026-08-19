@@ -85,7 +85,6 @@ var
     j : Integer;
     hasContent : Boolean;
   begin
-    Result := false;
     j := _Index+1;
     if (j <= Length(_Value)) and (_Value[j] = '#') then
       Inc(j);
