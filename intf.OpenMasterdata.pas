@@ -68,6 +68,12 @@ type
     procedure SetCredentials(const _Username, _Password, _CustomerNumber, _ClientID,
       _ClientSecret, _ClientScope : String; _GrantType : TOpenMasterdataGrantType;
       _DataPackagesSendMode : TOpenMasterdataDataPackagesSendMode);
+    //Steuert das Wiederholen ueberlasteter Anfragen (429, 502, 503, 504).
+    //_MaxRetries = 0 schaltet Wiederholungen ab.
+    //_MaxDelaySeconds begrenzt die Wartezeit je Versuch. Nennt der Server im
+    //Header Retry-After eine laengere Zeit, wird nicht gewartet, sondern der
+    //Fehler gemeldet, damit die Anwendung nicht scheinbar haengt.
+    procedure SetRetryPolicy(_MaxRetries, _MaxDelaySeconds : Integer);
 
     function GetData(_Url : String; out _Result : TStream) : Boolean;
 
@@ -119,10 +125,17 @@ type
     FLastErrorMessage : String;
     FLastErrorCode : Integer;
 
+    FMaxRetries : Integer;
+    FMaxRetryDelaySeconds : Integer;
+
     function LoggedIn: Boolean;
     function Login : Boolean;
     function RefreshLogin : Boolean;
     function CalculateTokenValidTo(_ExpiresInSeconds : Integer) : TDateTime;
+
+    //Fuehrt den Request aus und wiederholt ihn bei Ueberlast-Status.
+    //Liefert false, wenn der Aufruf mit einer Exception endete.
+    function ExecuteWithRetry(_Request : TRESTRequest; _Response : TRESTResponse) : Boolean;
     function TrySplitEndpointUrl(const _URL : String; out _Resource, _BaseUrl : String) : Boolean;
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
@@ -151,6 +164,11 @@ type
     procedure SetCredentials(const _Username, _Password, _CustomerNumber, _ClientID,
       _ClientSecret, _ClientScope : String; _GrantType : TGrantType;
       _DataPackagesSendMode : TDataPackagesSendMode);
+    procedure SetRetryPolicy(_MaxRetries, _MaxDelaySeconds : Integer);
+    //Entscheidet, ob ein Status wiederholt wird und wie lange vorher zu warten
+    //ist. Als reine Funktion ausgelegt, damit sie sich testen laesst.
+    class function TryGetRetryDelay(_StatusCode, _Attempt, _MaxRetries, _MaxDelaySeconds : Integer;
+      const _RetryAfterHeader : String; out _DelayMilliseconds : Integer) : Boolean; static;
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
@@ -430,6 +448,11 @@ begin
   FRefreshToken := '';
   FAccessTokenValidTo := 0;
   //FCookie := '';
+
+  //Zwei Wiederholungen bei Ueberlast, dazwischen 1 und 2 Sekunden. Laengere
+  //Wartezeiten aus Retry-After werden nicht abgewartet, siehe SetRetryPolicy.
+  FMaxRetries := 2;
+  FMaxRetryDelaySeconds := 10;
 end;
 
 destructor TOpenMasterdataApiClient.Destroy;
@@ -485,6 +508,95 @@ begin
       if not Result then
         Result := Login;
     end;
+  end;
+end;
+
+//Wiederholt werden nur Antworten, die eine voruebergehende Ueberlast anzeigen.
+//Alle uebrigen 4xx wuerden beim zweiten Versuch genauso beantwortet.
+class function TOpenMasterdataApiClient.TryGetRetryDelay(_StatusCode, _Attempt,
+  _MaxRetries, _MaxDelaySeconds: Integer; const _RetryAfterHeader: String;
+  out _DelayMilliseconds: Integer): Boolean;
+var
+  retryAfterSeconds : Integer;
+  delaySeconds : Integer;
+begin
+  Result := false;
+  _DelayMilliseconds := 0;
+
+  if _MaxRetries <= 0 then
+    exit;
+  if _Attempt >= _MaxRetries then
+    exit;
+  case _StatusCode of
+    429, 502, 503, 504 : ;
+  else
+    exit;
+  end;
+
+  //Exponentiell: 1s, 2s, 4s ...
+  delaySeconds := 1 shl _Attempt;
+
+  //Retry-After gibt entweder Sekunden oder ein HTTP-Datum an. Nur die
+  //Sekundenform wird ausgewertet, sie ist bei 429 die uebliche.
+  retryAfterSeconds := StrToIntDef(Trim(_RetryAfterHeader),-1);
+  if retryAfterSeconds >= 0 then
+  begin
+    //Nennt der Server eine laengere Wartezeit als zugestanden, wird nicht
+    //gewartet. Ein blockierter Aufrufer waere schlimmer als ein klarer Fehler.
+    if retryAfterSeconds > _MaxDelaySeconds then
+      exit;
+    delaySeconds := retryAfterSeconds;
+  end
+  else
+  if delaySeconds > _MaxDelaySeconds then
+    delaySeconds := _MaxDelaySeconds;
+
+  _DelayMilliseconds := delaySeconds*1000;
+  Result := true;
+end;
+
+function TOpenMasterdataApiClient.ExecuteWithRetry(_Request: TRESTRequest;
+  _Response: TRESTResponse): Boolean;
+var
+  attempt : Integer;
+  delayMilliseconds : Integer;
+begin
+  Result := false;
+  attempt := 0;
+  repeat
+    try
+      _Request.Execute;
+    except
+      on E:Exception do
+      begin
+        FLastErrorMessage := E.ClassName+' '+E.Message;
+        exit;
+      end;
+    end;
+
+    if not TryGetRetryDelay(_Response.StatusCode,attempt,FMaxRetries,FMaxRetryDelaySeconds,
+                            _Response.Headers.Values['Retry-After'],delayMilliseconds) then
+      break;
+
+    Sleep(delayMilliseconds);
+    Inc(attempt);
+  until false;
+
+  Result := true;
+end;
+
+procedure TOpenMasterdataApiClient.SetRetryPolicy(_MaxRetries, _MaxDelaySeconds: Integer);
+begin
+  FCS.Acquire;
+  try
+    if _MaxRetries < 0 then
+      _MaxRetries := 0;
+    if _MaxDelaySeconds < 0 then
+      _MaxDelaySeconds := 0;
+    FMaxRetries := _MaxRetries;
+    FMaxRetryDelaySeconds := _MaxDelaySeconds;
+  finally
+    FCS.Release;
   end;
 end;
 
@@ -591,15 +703,8 @@ begin
 
     RESTRequest.Response := RESTResponse;
 
-    try
-      RESTRequest.Execute;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+E.Message;
-        exit;
-      end;
-    end;
+    if not ExecuteWithRetry(RESTRequest,RESTResponse) then
+      exit;
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
@@ -678,15 +783,8 @@ begin
     RESTRequest.Params.AddItem('refresh_token',FRefreshToken);
     RESTRequest.Response := RESTResponse;
 
-    try
-      RESTRequest.Execute;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+E.Message;
-        exit;
-      end;
-    end;
+    if not ExecuteWithRetry(RESTRequest,RESTResponse) then
+      exit;
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
@@ -832,15 +930,8 @@ begin
       RESTRequest.AddParameter('customerId',TNetEncoding.URL.Encode(FCustomerId),TRESTRequestParameterKind.pkQUERY,[TRESTRequestParameterOption.poDoNotEncode]);
     RESTRequest.Response := RESTResponse;
 
-    try
-      RESTRequest.Execute;
-    except
-      on E:Exception do
-      begin
-        FLastErrorMessage := E.ClassName+' '+E.Message;
-        exit;
-      end;
-    end;
+    if not ExecuteWithRetry(RESTRequest,RESTResponse) then
+      exit;
 
     FLastErrorCode := RESTResponse.StatusCode;
 
@@ -914,6 +1005,9 @@ var
   lHttp : THTTPClient;
   lData : TMemoryStream;
   lHeaders : TNetHeaders;
+  lResponse : IHTTPResponse;
+  lAttempt : Integer;
+  lDelayMilliseconds : Integer;
 begin
   Result := false;
   _Result := nil;
@@ -935,24 +1029,36 @@ begin
   try
     try
       lHeaders := [TNetHeader.Create('Authorization','Bearer ' + FAccessToken)];
-      with lHttp.Get(_URL,lData,lHeaders) do
-      begin
-        Result := StatusCode = 200;
-        FLastErrorCode := StatusCode;
+      lAttempt := 0;
+      repeat
+        //Bei einem Wiederholungsversuch muss der Stream wieder leer sein,
+        //sonst haengt die zweite Antwort an der ersten
+        lData.Clear;
+        lResponse := lHttp.Get(_URL,lData,lHeaders);
+        FLastErrorCode := lResponse.StatusCode;
+        Result := lResponse.StatusCode = 200;
         if Result then
+          break;
+        if not TryGetRetryDelay(lResponse.StatusCode,lAttempt,FMaxRetries,FMaxRetryDelaySeconds,
+                                lResponse.HeaderValue['Retry-After'],lDelayMilliseconds) then
+          break;
+        Sleep(lDelayMilliseconds);
+        Inc(lAttempt);
+      until false;
+
+      if Result then
+      begin
+        _Result := lData;
+        lData := nil;
+      end
+      else
+      begin
+        FLastErrorMessage := StatusCodeToMessage(lResponse.StatusCode,lResponse.StatusText);
+        //Ein zurueckgezogener Token muss auch hier verworfen werden
+        if (lResponse.StatusCode = 401) or (lResponse.StatusCode = 403) then
         begin
-          _Result := lData;
-          lData := nil;
-        end
-        else
-        begin
-          FLastErrorMessage := StatusCodeToMessage(StatusCode,StatusText);
-          //Ein zurueckgezogener Token muss auch hier verworfen werden
-          if (StatusCode = 401) or (StatusCode = 403) then
-          begin
-            FAccessToken := '';
-            FAccessTokenValidTo := 0;
-          end;
+          FAccessToken := '';
+          FAccessTokenValidTo := 0;
         end;
       end;
     except

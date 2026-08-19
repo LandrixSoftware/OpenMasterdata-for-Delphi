@@ -40,6 +40,7 @@ uses
   System.IOUtils,
   System.StrUtils,
   System.DateUtils,
+  intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
   intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas';
 
@@ -426,6 +427,126 @@ begin
   end;
 end;
 
+//Felder, die erst mit OM 11 hinzukommen. Antworten nach 9.0.2 enthalten sie nicht;
+//liefert ein Echtsystem sie bereits, sollen sie nicht verlorengehen.
+procedure TestOpenMasterdata11Fields;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Felder ab OM 11');
+
+  res := Parse('{"supplierPid":"A1","status":"951",'+
+               '"basic":{"noOrderBefore":"2026-01-01","noDeliveryBefore":"2026-02-01",'+
+               '"noMarketingBefore":"2026-03-01","sparepartsystemURL":"https://x/ersatzteile",'+
+               '"sparepartsystemdescription":"Ersatzteilportal"},'+
+               '"additional":{"accessorieGroupIdManufacturer":"ZG7",'+
+               '"accessorieGroupDescrManufacturer":"Zubehoergruppe 7"},'+
+               '"prices":{"netPrice":[{"value":"10.00","lowerBound":"1.000"},'+
+               '{"value":"9.00","lowerBound":"10.000"}],'+
+               '"promotionalPrice":[{"value":"7.50","lowerBound":"1.000",'+
+               '"startOfValidity":"2026-04-01","endOfValidity":"2026-04-30"}]}}',err);
+  if res = nil then
+  begin
+    Check('Antwort parsebar',false,err);
+    exit;
+  end;
+  try
+    CheckEqualsInt('status',951,res.status);
+    CheckEquals('noOrderBefore','01.01.2026',DateToStr(res.basic.noOrderBefore));
+    CheckEquals('noDeliveryBefore','01.02.2026',DateToStr(res.basic.noDeliveryBefore));
+    CheckEquals('noMarketingBefore','01.03.2026',DateToStr(res.basic.noMarketingBefore));
+    CheckEquals('sparepartsystemURL','https://x/ersatzteile',res.basic.sparepartsystemURL);
+    CheckEquals('sparepartsystemdescription','Ersatzteilportal',res.basic.sparepartsystemdescription);
+    CheckEquals('accessorieGroupIdManufacturer','ZG7',res.additional.accessorieGroupIdManufacturer);
+    CheckEquals('accessorieGroupDescrManufacturer','Zubehoergruppe 7',res.additional.accessorieGroupDescrManufacturer);
+
+    //netPrice ist ab OM 11 eine Staffel aus BulkPrice
+    CheckEqualsInt('netPrice-Staffel',2,res.prices.netPriceScale.Count);
+    if res.prices.netPriceScale.Count = 2 then
+    begin
+      CheckEquals('lowerBound der ersten Stufe','1.000',res.prices.netPriceScale[0].lowerBound);
+      CheckEquals('lowerBound der zweiten Stufe','10.000',res.prices.netPriceScale[1].lowerBound);
+    end;
+
+    CheckEqualsInt('Aktionspreis vorhanden',1,res.prices.promotionalPrice.Count);
+    if res.prices.promotionalPrice.Count = 1 then
+    begin
+      CheckEquals('Aktionspreis Wert','7.50',res.prices.promotionalPrice[0].value);
+      CheckEquals('Aktionspreis ab','01.04.2026',DateToStr(res.prices.promotionalPrice[0].startOfValidity));
+      CheckEquals('Aktionspreis bis','30.04.2026',DateToStr(res.prices.promotionalPrice[0].endOfValidity));
+    end;
+  finally
+    res.Free;
+  end;
+
+  //Eine Antwort nach 9.0.2 darf davon unberuehrt bleiben
+  res := Parse('{"supplierPid":"A2","prices":{"netPrice":{"value":"5.00"}}}',err);
+  if res <> nil then
+  try
+    CheckEqualsInt('ohne status bleibt 0',0,res.status);
+    CheckEquals('lowerBound bleibt leer','',res.prices.netPrice.lowerBound);
+    CheckEqualsInt('kein Aktionspreis',0,res.prices.promotionalPrice.Count);
+  finally
+    res.Free;
+  end
+  else
+    Check('Antwort nach 9.0.2 parsebar',false,err);
+end;
+
+//Wiederholungen bei Ueberlast: welcher Status wird wiederholt und wie lange
+//wird gewartet.
+procedure TestRetryPolicy;
+var
+  delay : Integer;
+
+  function Retry(_Status,_Attempt : Integer; const _RetryAfter : String = '';
+    _MaxRetries : Integer = 2; _MaxDelay : Integer = 10) : Boolean;
+  begin
+    Result := TOpenMasterdataApiClient.TryGetRetryDelay(_Status,_Attempt,_MaxRetries,
+                _MaxDelay,_RetryAfter,delay);
+  end;
+
+begin
+  Writeln('Wiederholung bei Ueberlast');
+
+  //Nur Ueberlast-Status werden wiederholt
+  Check('429 wird wiederholt',Retry(429,0));
+  Check('503 wird wiederholt',Retry(503,0));
+  Check('502 wird wiederholt',Retry(502,0));
+  Check('504 wird wiederholt',Retry(504,0));
+  Check('404 wird nicht wiederholt',not Retry(404,0));
+  Check('401 wird nicht wiederholt',not Retry(401,0));
+  Check('400 wird nicht wiederholt',not Retry(400,0));
+  Check('500 wird nicht wiederholt',not Retry(500,0));
+  Check('200 wird nicht wiederholt',not Retry(200,0));
+
+  //Exponentiell: 1s, dann 2s
+  Retry(429,0);
+  CheckEqualsInt('erster Versuch wartet 1s',1000,delay);
+  Retry(429,1);
+  CheckEqualsInt('zweiter Versuch wartet 2s',2000,delay);
+
+  //Nach der konfigurierten Anzahl ist Schluss
+  Check('dritter Versuch entfaellt',not Retry(429,2));
+  Check('Wiederholungen abschaltbar',not Retry(429,0,'',0));
+
+  //Retry-After des Servers hat Vorrang, solange es im Rahmen bleibt
+  Check('Retry-After 5s wird akzeptiert',Retry(429,0,'5'));
+  CheckEqualsInt('Wartezeit folgt Retry-After',5000,delay);
+  Check('Retry-After 0 ist zulaessig',Retry(429,0,'0'));
+  CheckEqualsInt('Wartezeit 0',0,delay);
+
+  //Zu lange Wartezeit: lieber sofort einen Fehler melden als blockieren
+  Check('Retry-After 60s wird abgelehnt',not Retry(429,0,'60'));
+  Check('Retry-After genau am Limit gilt',Retry(429,0,'10'));
+
+  //Ein HTTP-Datum in Retry-After wird nicht ausgewertet, dann greift der
+  //exponentielle Abstand
+  Check('HTTP-Datum faellt auf Standardabstand zurueck',Retry(429,0,'Wed, 21 Oct 2026 07:28:00 GMT'));
+  CheckEqualsInt('Standardabstand',1000,delay);
+end;
+
 //Die HTML-Ausgabe darf keine aktiven Inhalte aus der Lieferantenantwort uebernehmen.
 procedure TestHtmlSanitizing;
 var
@@ -579,6 +700,10 @@ begin
     TestDocumentLanguage;
     Writeln;
     TestPriceScale;
+    Writeln;
+    TestOpenMasterdata11Fields;
+    Writeln;
+    TestRetryPolicy;
     Writeln;
     TestHtmlSanitizing;
     Writeln;

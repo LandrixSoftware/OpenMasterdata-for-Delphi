@@ -255,6 +255,8 @@ type
     FproductGroupIdManufacturer: String;
     FenergyEfficiencyClass: String;
     FbonusGroupDescrManufacturer: String;
+    FaccessorieGroupIdManufacturer: String;
+    FaccessorieGroupDescrManufacturer: String;
     FproductGroupDescrManufacturer: String;
   public
     constructor Create;
@@ -279,6 +281,9 @@ type
     property discountGroupDescrManufacturer : String read FdiscountGroupDescrManufacturer write FdiscountGroupDescrManufacturer;
     property bonusGroupIdManufacturer : String read FbonusGroupIdManufacturer write FbonusGroupIdManufacturer;
     property bonusGroupDescrManufacturer : String read FbonusGroupDescrManufacturer write FbonusGroupDescrManufacturer;
+    //Ab OM 11
+    property accessorieGroupIdManufacturer : String read FaccessorieGroupIdManufacturer write FaccessorieGroupIdManufacturer;
+    property accessorieGroupDescrManufacturer : String read FaccessorieGroupDescrManufacturer write FaccessorieGroupDescrManufacturer;
     property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories;
     property sets : TOpenMasterdataAPI_SetList read Fsets;
     property attribute : TOpenMasterdataAPI_AttributeList read Fattribute;
@@ -502,11 +507,28 @@ type
     FquantityUnit: String;
     Fvalue: String;
     Fcurrency: String;
+    FlowerBound: String;
   public
     property value : String read Fvalue write Fvalue;
     property currency : String read Fcurrency write Fcurrency;
     property basis : Integer read Fbasis write Fbasis;
     property quantityUnit : String read FquantityUnit write FquantityUnit;
+    //Ab OM 11: untere Staffelgrenze, ab der dieser Preis gilt.
+    //In Antworten nach 9.0.2 bleibt das Feld leer.
+    property lowerBound : String read FlowerBound write FlowerBound;
+  end;
+
+  //Ab OM 11: Aktionspreis mit Gueltigkeitszeitraum
+  TOpenMasterdataAPI_PromotionalPrice = class(TOpenMasterdataAPI_Price)
+  private
+    FstartOfValidity: TDateTime;
+    FendOfValidity: TDateTime;
+  public
+    property startOfValidity : TDateTime read FstartOfValidity write FstartOfValidity;
+    property endOfValidity : TDateTime read FendOfValidity write FendOfValidity;
+  end;
+
+  TOpenMasterdataAPI_PromotionalPriceList = class(TObjectList<TOpenMasterdataAPI_PromotionalPrice>)
   end;
 
   TOpenMasterdataAPI_PriceHelper = class helper for TOpenMasterdataAPI_Price
@@ -541,6 +563,11 @@ type
     FcommodityGroupDescr: String;
     FmainCommodityGroupId: String;
     FmodelNumber: String;
+    FnoOrderBefore: TDateTime;
+    FnoDeliveryBefore: TDateTime;
+    FnoMarketingBefore: TDateTime;
+    FsparepartsystemURL: String;
+    Fsparepartsystemdescription: String;
     Fmatchcode: String;
     FmainCommodityGroupDescr: String;
   public
@@ -560,6 +587,12 @@ type
     property matchcode : String read Fmatchcode write Fmatchcode; //max 15 Matchcode
     property serie : String read Fserie write Fserie; //max 80 Serie
     property modelNumber : String read FmodelNumber write FmodelNumber; //max 15 Modell
+    //Ab OM 11
+    property noOrderBefore : TDateTime read FnoOrderBefore write FnoOrderBefore; //Keine Bestellung vor
+    property noDeliveryBefore : TDateTime read FnoDeliveryBefore write FnoDeliveryBefore; //Keine Lieferung vor
+    property noMarketingBefore : TDateTime read FnoMarketingBefore write FnoMarketingBefore; //Keine Vermarktung vor
+    property sparepartsystemURL : String read FsparepartsystemURL write FsparepartsystemURL; //URL Ersatzteilsystem
+    property sparepartsystemdescription : String read Fsparepartsystemdescription write Fsparepartsystemdescription;
   end;
 
   //Rohstoffangaben
@@ -622,6 +655,7 @@ type
     FlistPriceScale: TOpenMasterdataAPI_PriceList;
     FnetPriceScale: TOpenMasterdataAPI_PriceList;
     FrrpScale: TOpenMasterdataAPI_PriceList;
+    FpromotionalPrice: TOpenMasterdataAPI_PromotionalPriceList;
   public
     constructor Create;
     destructor Destroy; override;
@@ -634,6 +668,8 @@ type
     property listPriceScale : TOpenMasterdataAPI_PriceList read FlistPriceScale;
     property netPriceScale : TOpenMasterdataAPI_PriceList read FnetPriceScale;
     property rrpScale : TOpenMasterdataAPI_PriceList read FrrpScale;
+    //Ab OM 11: Aktionspreise mit Gueltigkeitszeitraum
+    property promotionalPrice : TOpenMasterdataAPI_PromotionalPriceList read FpromotionalPrice;
     property taxCode : Integer read FtaxCode write FtaxCode; //Umsatzsteuer - 0 = voller Satz Ust.-Artikel - 1 = halber Satz Ust.-Artikel - 7 = Umkehr der Steuerschuld nach §13b UstG - 8 = Umsatzsteuerfrei nach §13b UstG „Bauleistungen
     property billBasis : String read FbillBasis write FbillBasis; //Abrechnungsbasis
     property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial; //Liste von Materialzuschlägen
@@ -695,6 +731,7 @@ type
     FmanufacturerId: String;
     FmanufacturerIdType: String;
     Fgtin: String;
+    Fstatus: Integer;
     Fsparepartlist: TOpenMasterdataAPI_Sparepartlist;
   public
     constructor Create;
@@ -705,6 +742,9 @@ type
     property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType; //Typ der Identifikation des Herstellers (z. B. DUNS, GLN, ...)
     property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid; //Identifikation des Herstellers
     property gtin : String read Fgtin write Fgtin; //GTIN des Artikels
+    //Ab OM 11: Status des Artikels je Treffer, 200, 404, 950, 951, 952 oder 960.
+    //0 bedeutet, dass die Antwort kein Statusfeld enthaelt.
+    property status : Integer read Fstatus write Fstatus;
     property basic : TOpenMasterdataAPI_Basic read Fbasic;
     property additional : TOpenMasterdataAPI_Additional read Fadditional;
     property logistics : TOpenMasterdataAPI_Logistics read Flogistics;
@@ -803,6 +843,7 @@ begin
   FlistPriceScale := TOpenMasterdataAPI_PriceList.Create;
   FnetPriceScale := TOpenMasterdataAPI_PriceList.Create;
   FrrpScale := TOpenMasterdataAPI_PriceList.Create;
+  FpromotionalPrice := TOpenMasterdataAPI_PromotionalPriceList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Prices.Destroy;
@@ -815,6 +856,7 @@ begin
   if Assigned(FlistPriceScale) then begin FlistPriceScale.Free; FlistPriceScale := nil; end;
   if Assigned(FnetPriceScale) then begin FnetPriceScale.Free; FnetPriceScale := nil; end;
   if Assigned(FrrpScale) then begin FrrpScale.Free; FrrpScale := nil; end;
+  if Assigned(FpromotionalPrice) then begin FpromotionalPrice.Free; FpromotionalPrice := nil; end;
   inherited;
 end;
 
@@ -943,6 +985,9 @@ var
       _Result.basis := StrToIntDef(scalarValue,1);
     if TryGetString(_Val,'quantityUnit',scalarValue) then
       _Result.quantityUnit := scalarValue;
+    //Ab OM 11 bei Staffelpreisen
+    if TryGetString(_Val,'lowerBound',scalarValue) then
+      _Result.lowerBound := scalarValue;
   end;
 
   //Preise koennen als Einzelobjekt oder als Staffel (Array) kommen.
@@ -1170,8 +1215,13 @@ begin
     prices.listPriceScale.Clear;
     prices.netPriceScale.Clear;
     prices.rrpScale.Clear;
+    prices.promotionalPrice.Clear;
+    status := 0;
     sparepartlist.sparepartlistRow.Clear;
 
+    //Ab OM 11: Status je Artikel
+    if TryGetInt(messageJson,'status',intValue) then
+      status := intValue;
     if TryGetString(messageJson,'supplierPid',valueAsString) then
       supplierPid := valueAsString;
     if TryGetString(messageJson,'manufacturerId',valueAsString) then
@@ -1191,6 +1241,19 @@ begin
         LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.rrp,prices.rrpScale);
       if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
         LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.netPrice,prices.netPriceScale);
+      //Ab OM 11: Aktionspreise mit Gueltigkeitszeitraum
+      if jsonValue.TryGetValue<TJSONArray>('promotionalPrice',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemPromotionalPrice : TOpenMasterdataAPI_PromotionalPrice := TOpenMasterdataAPI_PromotionalPrice.Create;
+        prices.promotionalPrice.Add(itemPromotionalPrice);
+
+        LoadPriceFromJson(jsonValue2,itemPromotionalPrice);
+        if TryGetString(jsonValue2,'startOfValidity',valueAsString) then
+          itemPromotionalPrice.startOfValidity := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+        if TryGetString(jsonValue2,'endOfValidity',valueAsString) then
+          itemPromotionalPrice.endOfValidity := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      end;
 
       if TryGetString(jsonValue,'taxCode',valueAsString) then
         prices.taxCode := StrToIntDef(valueAsString,0);
@@ -1265,6 +1328,17 @@ begin
         basic.serie := JsonArrayToDelimitedString(jsonArray);
       if TryGetString(jsonValue,'modelNumber',valueAsString) then
         basic.modelNumber := valueAsString;
+      //Ab OM 11
+      if TryGetString(jsonValue,'noOrderBefore',valueAsString) then
+        basic.noOrderBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'noDeliveryBefore',valueAsString) then
+        basic.noDeliveryBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'noMarketingBefore',valueAsString) then
+        basic.noMarketingBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'sparepartsystemURL',valueAsString) then
+        basic.sparepartsystemURL := valueAsString;
+      if TryGetString(jsonValue,'sparepartsystemdescription',valueAsString) then
+        basic.sparepartsystemdescription := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
     begin
@@ -1337,6 +1411,11 @@ begin
         additional.discountGroupDescrManufacturer := jsonString.Value;
       if jsonValue.TryGetValue<TJSONString>('bonusGroupIdManufacturer',jsonString) then
         additional.bonusGroupIdManufacturer := jsonString.Value;
+      //Ab OM 11
+      if TryGetString(jsonValue,'accessorieGroupIdManufacturer',valueAsString) then
+        additional.accessorieGroupIdManufacturer := valueAsString;
+      if TryGetString(jsonValue,'accessorieGroupDescrManufacturer',valueAsString) then
+        additional.accessorieGroupDescrManufacturer := valueAsString;
       if jsonValue.TryGetValue<TJSONString>('bonusGroupDescrManufacturer',jsonString) then
         additional.bonusGroupDescrManufacturer := jsonString.Value;
       if jsonValue.TryGetValue<TJSONArray>('accessories',jsonArray) then

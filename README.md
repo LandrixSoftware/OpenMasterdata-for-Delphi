@@ -48,6 +48,34 @@ Aktuell berücksichtigt der Loader insbesondere folgende Fälle:
  - Der optionale Query-Parameter `customerId` lässt sich über `SetCustomerId` setzen.
  - Die Sonderstatus `950` und `951` liefern laut Spezifikation ein vollständiges Produkt, nämlich den Alternativ- bzw. Nachfolgeartikel. Deren Antwort wird geparst; der Statuscode bleibt über `GetLastErrorCode` abfragbar.
 
+## Wiederholung bei Überlast
+
+Antworten mit `429`, `502`, `503` oder `504` werden standardmäßig zweimal wiederholt, mit 1 und 2 Sekunden Abstand. Alle übrigen Statuscodes werden nicht wiederholt, weil sie beim zweiten Versuch dieselbe Antwort ergäben.
+
+Nennt der Server im Header `Retry-After` eine Wartezeit in Sekunden, hat diese Vorrang. Liegt sie über der zugestandenen Obergrenze von 10 Sekunden, wird **nicht** gewartet, sondern der Fehler gemeldet. Hintergrund: der Aufruf blockiert, und eine Anwendung, die eine Minute lang nicht reagiert, wirkt abgestürzt. Der Aufrufer kann anhand von `GetLastErrorCode` selbst entscheiden, ob und wann er es erneut versucht.
+
+Beides lässt sich anpassen, etwa für Hintergrunddienste ohne Oberfläche:
+
+```pascal
+client.SetRetryPolicy(3,60); //drei Wiederholungen, bis zu 60 Sekunden Wartezeit
+client.SetRetryPolicy(0,0);  //Wiederholungen abschalten
+```
+
+Bei Sammelabrufen ist zu beachten, dass sich die Wartezeiten über alle Artikel summieren.
+
+## Felder ab OpenMasterdata 11
+
+Die folgenden Felder sind noch nicht Teil der umgesetzten Version 9.0.2. Sie werden bereits gelesen, damit nichts verlorengeht, sobald ein Echtsystem sie liefert. In Antworten nach 9.0.2 bleiben sie leer.
+
+ - `status` je Artikel (`200`, `404`, `950`, `951`, `952`, `960`), als Zahl in `TOpenMasterdataAPI_Result.status`. `0` bedeutet, dass die Antwort kein Statusfeld enthält.
+ - `prices.promotionalPrice` als Liste von Aktionspreisen mit `startOfValidity` und `endOfValidity`.
+ - `lowerBound` an Preisen, die untere Staffelgrenze. In OM 11 ist `netPrice` eine Staffel aus `BulkPrice`; die Werte stehen in `netPriceScale`.
+ - `basic.noOrderBefore`, `basic.noDeliveryBefore`, `basic.noMarketingBefore`.
+ - `basic.sparepartsystemURL` und `basic.sparepartsystemdescription`.
+ - `additional.accessorieGroupIdManufacturer` und `additional.accessorieGroupDescrManufacturer`.
+
+Da die Bibliothek künftig gegen reale Antworten statt gegen die Dokumentation abgeglichen wird, sollten neue Beispiel-Responses immer über die Tests geprüft werden.
+
 ## Tests
 
 Unter `Tests` liegt ein Konsolenprogramm mit Regressionstests für den Parser und die HTML-Ausgabe.
