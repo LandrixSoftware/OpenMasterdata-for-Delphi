@@ -1,4 +1,4 @@
-{
+﻿{
 License OpenMasterdata-for-Delphi
 
 Copyright (C) 2026 Landrix Software GmbH & Co. KG
@@ -43,6 +43,12 @@ const
   COpenMasterdataStatusInactive           = 960; //Artikel nicht mehr aktiv
 
 type
+  //Auf Unit-Ebene deklariert, damit sie schon im Interface verwendbar sind.
+  //TOpenMasterdataApiClient fuehrt sie als TGrantType bzw.
+  //TDataPackagesSendMode weiter, bestehender Code bleibt gueltig.
+  TOpenMasterdataGrantType = (omdgt_Password,omdgt_ClientCredentials);
+  TOpenMasterdataDataPackagesSendMode = (omddpsm_PipeDelimited,omddpsm_Exploded);
+
   IOpenMasterdataApiClient = interface
     ['{425FC785-64D4-4A17-A012-49F60448EBF8}']
 
@@ -57,6 +63,11 @@ type
     //Optionaler Query-Parameter der Spec 9.0.0. Gilt ein Zugang fuer mehrere
     //Kunden, waehlt customerId den Kunden aus, fuer den die Preise gelten.
     procedure SetCustomerId(const _CustomerId : String);
+    //Aktualisiert die Zugangsdaten einer bestehenden Verbindung. Ein bereits
+    //erhaltener Token wird dabei verworfen.
+    procedure SetCredentials(const _Username, _Password, _CustomerNumber, _ClientID,
+      _ClientSecret, _ClientScope : String; _GrantType : TOpenMasterdataGrantType;
+      _DataPackagesSendMode : TOpenMasterdataDataPackagesSendMode);
 
     function GetData(_Url : String; out _Result : TStream) : Boolean;
 
@@ -70,8 +81,8 @@ type
 
   TOpenMasterdataApiClient = class(TInterfacedObject,IOpenMasterdataApiClient)
   public type
-    TGrantType = (omdgt_Password,omdgt_ClientCredentials);
-    TDataPackagesSendMode = (omddpsm_PipeDelimited,omddpsm_Exploded);
+    TGrantType = TOpenMasterdataGrantType;
+    TDataPackagesSendMode = TOpenMasterdataDataPackagesSendMode;
   private
     FCS : TCriticalSection;
     FUsername,
@@ -134,6 +145,9 @@ type
     procedure SetByManufacturerDataURL(const _URL : String);
     procedure SetByGTINURL(const _URL : String);
     procedure SetCustomerId(const _CustomerId : String);
+    procedure SetCredentials(const _Username, _Password, _CustomerNumber, _ClientID,
+      _ClientSecret, _ClientScope : String; _GrantType : TGrantType;
+      _DataPackagesSendMode : TDataPackagesSendMode);
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
@@ -265,7 +279,12 @@ end;
 function BuildRestBaseUrl(const _Url : TURI) : String;
 begin
   Result := _Url.Scheme+'://'+_Url.Host;
-  if _Url.Port > 0 then
+  //TURI setzt bei fehlender Portangabe den Standardport des Schemas ein.
+  //Diesen wieder anzuhaengen ist ueberfluessig und stoert Gegenstellen mit
+  //strikter Pruefung des Host-Headers.
+  if (_Url.Port > 0) and
+     not (SameText(_Url.Scheme,'https') and (_Url.Port = 443)) and
+     not (SameText(_Url.Scheme,'http') and (_Url.Port = 80)) then
     Result := Result + ':' + _Url.Port.ToString;
 end;
 
@@ -336,6 +355,10 @@ begin
               IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
     begin
       Result := IOpenMasterdataApiClient(openConnections[i]);
+      //Eine bestehende Verbindung wird weiterverwendet, die uebergebenen
+      //Zugangsdaten duerfen dabei aber nicht verlorengehen
+      Result.SetCredentials(_Username,_Password,_CustomerNumber,_ClientID,
+        _ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
       exit;
     end;
 
@@ -1022,6 +1045,36 @@ begin
   FCS.Acquire;
   try
     FCustomerId := _CustomerId;
+  finally
+    FCS.Release;
+  end;
+end;
+
+procedure TOpenMasterdataApiClient.SetCredentials(const _Username, _Password,
+  _CustomerNumber, _ClientID, _ClientSecret, _ClientScope: String;
+  _GrantType: TGrantType; _DataPackagesSendMode: TDataPackagesSendMode);
+begin
+  FCS.Acquire;
+  try
+    if (FUsername = _Username) and (FPassword = _Password) and
+       (FCustomerNumber = _CustomerNumber) and (FClientID = _ClientID) and
+       (FClientSecret = _ClientSecret) and (FClientScope = _ClientScope) and
+       (FGrantType = _GrantType) and (FDataPackagesSendMode = _DataPackagesSendMode) then
+      exit;
+
+    FUsername := _Username;
+    FPassword := _Password;
+    FCustomerNumber := _CustomerNumber;
+    FClientID := _ClientID;
+    FClientSecret := _ClientSecret;
+    FClientScope := _ClientScope;
+    FGrantType := _GrantType;
+    FDataPackagesSendMode := _DataPackagesSendMode;
+
+    //Mit geaenderten Zugangsdaten ist der bisherige Token nicht mehr gueltig
+    FAccessToken := '';
+    FRefreshToken := '';
+    FAccessTokenValidTo := 0;
   finally
     FCS.Release;
   end;

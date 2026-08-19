@@ -396,6 +396,36 @@ begin
   end;
 end;
 
+procedure TestPriceScale;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Preisstaffeln');
+
+  res := Parse('{"prices":{"listPrice":[{"value":"10.00","basis":"1"},'+
+               '{"value":"9.00","basis":"10"},{"value":"8.00","basis":"100"}],'+
+               '"netPrice":{"value":"7.00"}}}',err);
+  if res = nil then
+  begin
+    Check('Antwort parsebar',false,err);
+    exit;
+  end;
+  try
+    CheckEquals('listPrice bleibt die erste Stufe','10.00',res.prices.listPrice.value);
+    CheckEqualsInt('alle Stufen vorhanden',3,res.prices.listPriceScale.Count);
+    if res.prices.listPriceScale.Count = 3 then
+    begin
+      CheckEquals('zweite Stufe','9.00',res.prices.listPriceScale[1].value);
+      CheckEqualsInt('Basis der dritten Stufe',100,res.prices.listPriceScale[2].basis);
+    end;
+    CheckEquals('Einzelpreis unveraendert','7.00',res.prices.netPrice.value);
+    CheckEqualsInt('kein Staffeleintrag bei Einzelpreis',0,res.prices.netPriceScale.Count);
+  finally
+    res.Free;
+  end;
+end;
+
 //Die HTML-Ausgabe darf keine aktiven Inhalte aus der Lieferantenantwort uebernehmen.
 procedure TestHtmlSanitizing;
 var
@@ -547,6 +577,8 @@ begin
     TestEnumCodes;
     Writeln;
     TestDocumentLanguage;
+    Writeln;
+    TestPriceScale;
     Writeln;
     TestHtmlSanitizing;
     Writeln;

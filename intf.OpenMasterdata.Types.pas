@@ -263,8 +263,8 @@ type
     property minOrderQuantity : double read FminOrderQuantity write FminOrderQuantity; //Mindestbestellmenge
     property minOrderUnit : String read FminOrderUnit write FminOrderUnit; //Units (Mengeneinheiten) -- Code Beschreibung\n- CMK = Quadratzentimeter\n- CMQ = Kubikzentimeter\n- CMT = Zentimeter\n- DZN = Dutzend\n- GRM = Gramm\n- HLT = Hektoliter\n- KGM = Kilogramm\n- KTM = Kilometer\n- LTR = Liter\n- MMT = Millimeter\n- MTK = Quadratmeter\n- MTQ = Kubikmeter\n- MTR = Meter\n- PCE = Stück\n- PR = Paar\n- SET = Satz\n- TNE = Tonne
     property articleNumberCatalogue : String read FarticleNumberCatalogue write FarticleNumberCatalogue; //max 15 Werksartikelnummer Katalog
-    property alternativeProduct : TOpenMasterdataAPI_AlternativeProductList read FalternativeProduct write FalternativeProduct;
-    property followupProduct : TOpenMasterdataAPI_FollowupProductList read FfollowupProduct write FfollowupProduct;
+    property alternativeProduct : TOpenMasterdataAPI_AlternativeProductList read FalternativeProduct;
+    property followupProduct : TOpenMasterdataAPI_FollowupProductList read FfollowupProduct;
     property deepLink : String read FdeepLink write FdeepLink; //max 256 Deeplink zum Artikel
     property expiringProduct : Boolean read FexpiringProduct write FexpiringProduct; //enum" : [ true, "Yes-Successor", false ] Auslaufartikel\n  - Yes = Artikel ist Auslauf\n  - Yes-Successor = Artikel ist Auslauf und Nachfolgeartikel existiert\n  - No = Artikel ist nicht Auslauf
     property expiringProductState : String read FexpiringProductState write FexpiringProductState;
@@ -279,9 +279,9 @@ type
     property discountGroupDescrManufacturer : String read FdiscountGroupDescrManufacturer write FdiscountGroupDescrManufacturer;
     property bonusGroupIdManufacturer : String read FbonusGroupIdManufacturer write FbonusGroupIdManufacturer;
     property bonusGroupDescrManufacturer : String read FbonusGroupDescrManufacturer write FbonusGroupDescrManufacturer;
-    property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories write Faccessories;
-    property sets : TOpenMasterdataAPI_SetList read Fsets write Fsets;
-    property attribute : TOpenMasterdataAPI_AttributeList read Fattribute write Fattribute;
+    property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories;
+    property sets : TOpenMasterdataAPI_SetList read Fsets;
+    property attribute : TOpenMasterdataAPI_AttributeList read Fattribute;
     property constructionFrom : String read FconstructionFrom write FconstructionFrom;
     property constructionTo : String read FconstructionTo write FconstructionTo;
     property constructionText : String read FconstructionText write FconstructionText;
@@ -370,10 +370,10 @@ type
     property packagingType : TOpenMasterdataAPI_PackageType read FpackagingType write FpackagingType;
     property quantity : double read Fquantity write Fquantity;
     property gtin : String read Fgtin write Fgtin;
-    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
-    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
-    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
-    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA;
+    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB;
+    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC;
+    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight;
   end;
 
   TOpenMasterdataAPI_PackagingUnitList = class(TObjectList<TOpenMasterdataAPI_PackagingUnit>);
@@ -422,12 +422,12 @@ type
     property lucidNumber : String read FlucidNumber write FlucidNumber;
     property packagingDisposalProvider : String read FpackagingDisposalProvider write FpackagingDisposalProvider;
     property weeeNumber : String read FweeeNumber write FweeeNumber;
-    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
-    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
-    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
-    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA;
+    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB;
+    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC;
+    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight;
     property packagingQuantity : Integer read FpackagingQuantity write FpackagingQuantity;
-    property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits write FpackagingUnits;
+    property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits;
   end;
 
   TOpenMasterdataAPI_TextRow = class
@@ -459,8 +459,8 @@ type
     /// Text
     /// </summary>
     property text : String read Ftext write Ftext;
-    property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct write FlinkedProduct;
-    property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct write FlinkedHistoricProduct;
+    property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct;
+    property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct;
   public
     constructor Create;
     destructor Destroy; override;
@@ -471,8 +471,8 @@ type
     FtextRow: TOpenMasterdataAPI_TextRow;
     FarticleRow: TOpenMasterdataAPI_ArticleRow;
   public
-    property textRow : TOpenMasterdataAPI_TextRow read FtextRow write FtextRow;
-    property articleRow : TOpenMasterdataAPI_ArticleRow read FarticleRow write FarticleRow;
+    property textRow : TOpenMasterdataAPI_TextRow read FtextRow;
+    property articleRow : TOpenMasterdataAPI_ArticleRow read FarticleRow;
   public
     constructor Create;
     destructor Destroy; override;
@@ -487,7 +487,7 @@ type
     FsparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList;
   public
     property listNumber : String read FlistNumber write FlistNumber;
-    property sparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList read FsparepartlistRow write FsparepartlistRow;
+    property sparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList read FsparepartlistRow;
   public
     constructor Create;
     destructor Destroy; override;
@@ -509,6 +509,9 @@ type
   TOpenMasterdataAPI_PriceHelper = class helper for TOpenMasterdataAPI_Price
   public
     function ValueAsCurrency : Currency;
+  end;
+
+  TOpenMasterdataAPI_PriceList = class(TObjectList<TOpenMasterdataAPI_Price>)
   end;
 
   TOpenMasterdataAPI_LinePrice = class(TOpenMasterdataAPI_Price)
@@ -545,7 +548,7 @@ type
     property endOfValidity : TDate read FendOfValidity write FendOfValidity; //Gültigkeitsende
     property productShortDescr : String read FproductShortDescr write FproductShortDescr; //max 256 Artikelkurzbeschreibung (neuer Text aus dem Textgipfel)
     property priceOnDemand : Boolean read FpriceOnDemand write FpriceOnDemand; //Angabe, ob der Preis des Artikels nur auf Anfrage übermittelt wird
-    property rrp : TOpenMasterdataAPI_Price read Frrp write Frrp;
+    property rrp : TOpenMasterdataAPI_Price read Frrp;
     property mainCommodityGroupId : String read FmainCommodityGroupId write FmainCommodityGroupId; //max 3 Hauptwarengruppe Handel
     property mainCommodityGroupDescr : String read FmainCommodityGroupDescr write FmainCommodityGroupDescr; //max 40 Hauptwarengruppe Beschreibung Handel
     property commodityGroupId : String read FcommodityGroupId write FcommodityGroupId; //max 10 Warengruppe Handel
@@ -613,17 +616,25 @@ type
     FtaxCode: Integer;
     FbillBasis : String;
     FrawMaterial: TOpenMasterdataAPI_Materials;
+    FlistPriceScale: TOpenMasterdataAPI_PriceList;
+    FnetPriceScale: TOpenMasterdataAPI_PriceList;
+    FrrpScale: TOpenMasterdataAPI_PriceList;
   public
     constructor Create;
     destructor Destroy; override;
 
-    property listPrice : TOpenMasterdataAPI_Price read FlistPrice write FlistPrice;
-    property rrp : TOpenMasterdataAPI_Price read Frrp write Frrp;
-    property netPrice : TOpenMasterdataAPI_Price read FnetPrice write FnetPrice;
+    property listPrice : TOpenMasterdataAPI_Price read FlistPrice;
+    property rrp : TOpenMasterdataAPI_Price read Frrp;
+    property netPrice : TOpenMasterdataAPI_Price read FnetPrice;
+    //Liefert ein Lieferant mehrere Preisstufen als Array, stehen hier alle
+    //Stufen. listPrice, netPrice und rrp enthalten weiterhin die erste Stufe.
+    property listPriceScale : TOpenMasterdataAPI_PriceList read FlistPriceScale;
+    property netPriceScale : TOpenMasterdataAPI_PriceList read FnetPriceScale;
+    property rrpScale : TOpenMasterdataAPI_PriceList read FrrpScale;
     property taxCode : Integer read FtaxCode write FtaxCode; //Umsatzsteuer - 0 = voller Satz Ust.-Artikel - 1 = halber Satz Ust.-Artikel - 7 = Umkehr der Steuerschuld nach §13b UstG - 8 = Umsatzsteuerfrei nach §13b UstG „Bauleistungen
     property billBasis : String read FbillBasis write FbillBasis; //Abrechnungsbasis
-    property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial write FrawMaterial; //Liste von Materialzuschlägen
-    property linePrice : TOpenMasterdataAPI_LinePriceList read FlinePrice write FlinePrice;
+    property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial; //Liste von Materialzuschlägen
+    property linePrice : TOpenMasterdataAPI_LinePriceList read FlinePrice;
   end;
 
   TOpenMasterdataAPI_Descriptions = class
@@ -691,14 +702,14 @@ type
     property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType; //Typ der Identifikation des Herstellers (z. B. DUNS, GLN, ...)
     property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid; //Identifikation des Herstellers
     property gtin : String read Fgtin write Fgtin; //GTIN des Artikels
-    property basic : TOpenMasterdataAPI_Basic read Fbasic write Fbasic;
-    property additional : TOpenMasterdataAPI_Additional read Fadditional write Fadditional;
-    property logistics : TOpenMasterdataAPI_Logistics read Flogistics write Flogistics;
-    property prices : TOpenMasterdataAPI_Prices read Fprices write Fprices;
-    property descriptions : TOpenMasterdataAPI_Descriptions read Fdescriptions write Fdescriptions;
-    property pictures : TOpenMasterdataAPI_PictureList read Fpictures write Fpictures;
-    property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist write Fsparepartlist;
-    property documents : TOpenMasterdataAPI_DocumentList read Fdocuments write Fdocuments;
+    property basic : TOpenMasterdataAPI_Basic read Fbasic;
+    property additional : TOpenMasterdataAPI_Additional read Fadditional;
+    property logistics : TOpenMasterdataAPI_Logistics read Flogistics;
+    property prices : TOpenMasterdataAPI_Prices read Fprices;
+    property descriptions : TOpenMasterdataAPI_Descriptions read Fdescriptions;
+    property pictures : TOpenMasterdataAPI_PictureList read Fpictures;
+    property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist;
+    property documents : TOpenMasterdataAPI_DocumentList read Fdocuments;
   end;
 
   TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
@@ -786,6 +797,9 @@ begin
   FlinePrice := TOpenMasterdataAPI_LinePriceList.Create;
   FnetPrice := TOpenMasterdataAPI_Price.Create;
   FrawMaterial := TOpenMasterdataAPI_Materials.Create;
+  FlistPriceScale := TOpenMasterdataAPI_PriceList.Create;
+  FnetPriceScale := TOpenMasterdataAPI_PriceList.Create;
+  FrrpScale := TOpenMasterdataAPI_PriceList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Prices.Destroy;
@@ -795,6 +809,9 @@ begin
   if Assigned(FlinePrice) then begin FlinePrice.Free; FlinePrice := nil; end;
   if Assigned(FnetPrice) then begin FnetPrice.Free; FnetPrice := nil; end;
   if Assigned(FrawMaterial) then begin FrawMaterial.Free; FrawMaterial := nil; end;
+  if Assigned(FlistPriceScale) then begin FlistPriceScale.Free; FlistPriceScale := nil; end;
+  if Assigned(FnetPriceScale) then begin FnetPriceScale.Free; FnetPriceScale := nil; end;
+  if Assigned(FrrpScale) then begin FrrpScale.Free; FrrpScale := nil; end;
   inherited;
 end;
 
@@ -925,9 +942,13 @@ var
       _Result.quantityUnit := scalarValue;
   end;
 
-  procedure LoadPriceOrFirstArrayItemFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
+  //Preise koennen als Einzelobjekt oder als Staffel (Array) kommen.
+  //_Result erhaelt die erste Stufe, _Scale alle Stufen.
+  procedure LoadPriceOrFirstArrayItemFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price;
+    _Scale : TOpenMasterdataAPI_PriceList = nil);
   var
     priceArray : TJSONArray;
+    priceItem : TJSONValue;
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
@@ -937,6 +958,13 @@ var
       priceArray := TJSONArray(_Val);
       if priceArray.Count > 0 then
         LoadPriceFromJson(priceArray.Items[0],_Result);
+      if Assigned(_Scale) then
+        for priceItem in priceArray do
+        begin
+          var itemPrice : TOpenMasterdataAPI_Price := TOpenMasterdataAPI_Price.Create;
+          _Scale.Add(itemPrice);
+          LoadPriceFromJson(priceItem,itemPrice);
+        end;
       exit;
     end;
 
@@ -1136,6 +1164,9 @@ begin
     logistics.packagingUnits.Clear;
     prices.rawMaterial.Clear;
     prices.linePrice.Clear;
+    prices.listPriceScale.Clear;
+    prices.netPriceScale.Clear;
+    prices.rrpScale.Clear;
     sparepartlist.sparepartlistRow.Clear;
 
     if TryGetString(messageJson,'supplierPid',valueAsString) then
@@ -1152,11 +1183,11 @@ begin
     if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
     begin
       if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.listPrice);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.listPrice,prices.listPriceScale);
       if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.rrp);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.rrp,prices.rrpScale);
       if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.netPrice);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.netPrice,prices.netPriceScale);
 
       if TryGetString(jsonValue,'taxCode',valueAsString) then
         prices.taxCode := StrToIntDef(valueAsString,0);
