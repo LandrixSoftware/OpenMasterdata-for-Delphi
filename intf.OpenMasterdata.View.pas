@@ -56,6 +56,104 @@ var
     Result := StringReplace(Result,'"','&quot;',[rfReplaceAll]);
   end;
 
+  //Nur diese Tags duerfen unveraendert durchgereicht werden. Eine Positivliste
+  //ist hier zwingend: eine Sperrliste laesst sich mit Varianten wie
+  //<img src=x onerror =...> oder <svg onload=...> umgehen.
+  function IsAllowedTag(const _TagName : String) : Boolean;
+  const
+    CAllowedTags : array[0..13] of String = (
+      'p','br','div','span','ul','ol','li','table','tr','td','th','strong','em','b');
+  var
+    allowed : String;
+  begin
+    Result := false;
+    for allowed in CAllowedTags do
+      if SameText(_TagName,allowed) then
+        exit(true);
+  end;
+
+  //Entfernt alle nicht erlaubten Tags und saemtliche Attribute. Damit bleiben
+  //Absaetze und Listen der Lieferantenbeschreibung erhalten, waehrend
+  //Ereignis-Attribute, Skripte und aktive URLs nicht ins Ergebnis gelangen.
+  function SanitizeHtml(const _Value : String) : String;
+  var
+    i,tagStart : Integer;
+    tagContent,tagName : String;
+    isClosingTag : Boolean;
+    builder : TStringBuilder;
+  begin
+    builder := TStringBuilder.Create;
+    try
+      i := 1;
+      while i <= Length(_Value) do
+      begin
+        if _Value[i] <> '<' then
+        begin
+          //Zeichen ausserhalb von Tags werden maskiert
+          case _Value[i] of
+            '&' : builder.Append('&amp;');
+            '>' : builder.Append('&gt;');
+            '"' : builder.Append('&quot;');
+          else
+            builder.Append(_Value[i]);
+          end;
+          Inc(i);
+          continue;
+        end;
+
+        tagStart := i;
+        Inc(i);
+        tagContent := '';
+        while (i <= Length(_Value)) and (_Value[i] <> '>') do
+        begin
+          tagContent := tagContent + _Value[i];
+          Inc(i);
+        end;
+        if i > Length(_Value) then
+        begin
+          //Kein schliessendes >, der Rest ist Text
+          builder.Append('&lt;');
+          builder.Append(HtmlEncode(Copy(_Value,tagStart+1,MaxInt)));
+          break;
+        end;
+        Inc(i); //das > ueberspringen
+
+        tagContent := Trim(tagContent);
+        isClosingTag := StartsText('/',tagContent);
+        if isClosingTag then
+          tagContent := Trim(Copy(tagContent,2,MaxInt));
+        //Selbstschliessendes Tag
+        tagContent := TrimRight(tagContent);
+        if EndsText('/',tagContent) then
+          tagContent := TrimRight(Copy(tagContent,1,Length(tagContent)-1));
+
+        //Nur der Tagname bis zum ersten Trennzeichen zaehlt, Attribute entfallen
+        tagName := tagContent;
+        for var charIndex := 1 to Length(tagContent) do
+          if CharInSet(tagContent[charIndex],[' ',#9,#10,#13,'/']) then
+          begin
+            tagName := Copy(tagContent,1,charIndex-1);
+            break;
+          end;
+
+        if IsAllowedTag(tagName) then
+        begin
+          if isClosingTag then
+            builder.Append('</'+LowerCase(tagName)+'>')
+          else
+          if SameText(tagName,'br') then
+            builder.Append('<br/>')
+          else
+            builder.Append('<'+LowerCase(tagName)+'>');
+        end;
+        //Nicht erlaubte Tags werden ersatzlos verworfen
+      end;
+      Result := builder.ToString;
+    finally
+      builder.Free;
+    end;
+  end;
+
   function LooksLikeSupportedHtml(const _Value : String) : Boolean;
   var
     trimmedValue : String;
@@ -72,36 +170,34 @@ var
       or ContainsText(trimmedValue,'<em');
   end;
 
-  function ContainsUnsafeHtml(const _Value : String) : Boolean;
-  begin
-    Result := ContainsText(_Value,'<script')
-      or ContainsText(_Value,'<iframe')
-      or ContainsText(_Value,'<object')
-      or ContainsText(_Value,'<embed')
-      or ContainsText(_Value,'<link')
-      or ContainsText(_Value,'<meta')
-      or ContainsText(_Value,'javascript:')
-      or ContainsText(_Value,'vbscript:')
-      or ContainsText(_Value,'data:text/html')
-      or ContainsText(_Value,' onload=')
-      or ContainsText(_Value,' onclick=')
-      or ContainsText(_Value,' onerror=')
-      or ContainsText(_Value,' onmouseover=');
-  end;
-
   function RenderDescription(const _Value : String) : String;
   begin
     if _Value = '' then
       exit('');
 
-    if LooksLikeSupportedHtml(_Value) and (not ContainsUnsafeHtml(_Value)) then
-      exit(_Value);
+    if LooksLikeSupportedHtml(_Value) then
+      exit(SanitizeHtml(_Value));
 
     Result := HtmlEncode(_Value);
     Result := StringReplace(Result,sLineBreak,'<br/>',[rfReplaceAll]);
     Result := StringReplace(Result,#10,'<br/>',[rfReplaceAll]);
     Result := StringReplace(Result,#13,'',[rfReplaceAll]);
     Result := '<p>' + Result + '</p>';
+  end;
+
+  //HTML-Encoding allein schuetzt nicht vor javascript: und aehnlichen Schemata
+  function SafeUrl(const _Value : String) : String;
+  var
+    trimmedValue : String;
+  begin
+    Result := '';
+    trimmedValue := Trim(_Value);
+    if trimmedValue = '' then
+      exit;
+    if StartsText('http://',trimmedValue) or
+       StartsText('https://',trimmedValue) or
+       StartsText('mailto:',trimmedValue) then
+      Result := HtmlEncode(trimmedValue);
   end;
 
   procedure AddLinkedProductHtml(_Item : TOpenMasterdataAPI_LinkedProduct; const _ReferenceType : String = '');
@@ -113,8 +209,9 @@ var
 
     html.Add('<div style="margin-bottom:1rem;">');
     imageUrl := IfThen(_Item.thumbnailUrl.IsEmpty,_Item.imageLink,_Item.thumbnailUrl);
+    imageUrl := SafeUrl(imageUrl);
     if imageUrl <> '' then
-      html.Add('<img src="'+HtmlEncode(imageUrl)+'" style="max-width:180px;max-height:180px;display:block;margin-bottom:0.5rem;"></img>');
+      html.Add('<img src="'+imageUrl+'" style="max-width:180px;max-height:180px;display:block;margin-bottom:0.5rem;"/>');
     if _Item.productShortDescr <> '' then
       html.Add('<strong>'+HtmlEncode(_Item.productShortDescr)+'</strong><br/>');
     if _Item.manufacturerPid <> '' then
@@ -132,9 +229,8 @@ var
       exit;
 
     AddLinkedProductHtml(_Item,_Item.referenceType);
-    if html.Count = 0 then
-      exit;
 
+    //AddLinkedProductHtml schliesst mit </div>, davor gehoeren die Zusatzangaben
     if _Item.amount > 0 then
       html.Insert(html.Count-1,'Menge: '+FloatToStr(_Item.amount)+'<br/>');
     if _Item.necessaryForFunction then
@@ -162,6 +258,9 @@ var
   end;
 begin
   Result := '';
+  if _Val = nil then
+    exit;
+
   html := TStringList.Create;
   try
     html.Add('<html>');
@@ -172,7 +271,7 @@ begin
       html.Add(RenderDescription(_Val.descriptions.productDescr));
 
     if (_Val.additional.deepLink <> '') then
-      html.Add('<a href="'+HtmlEncode(_Val.additional.deepLink)+'" target="_blank">Weitere Details online</a><br/>');
+      html.Add('<a href="'+SafeUrl(_Val.additional.deepLink)+'" target="_blank" rel="noopener noreferrer">Weitere Details online</a><br/>');
     if _Val.basic.startOfValidity > 0 then
       html.Add('G&uuml;ltig ab: '+DateToStr(_Val.basic.startOfValidity)+'<br/>');
     if _Val.additional.expiringProduct then
@@ -192,9 +291,9 @@ begin
     if (_Val.basic.priceOnDemand) then
       html.Add('Preis nur auf Anfrage.<br/>');
     if (_Val.prices.listPrice.ValueAsCurrency > 0) then
-      html.Add('Listenpreis: '+Format('%n %s',[_Val.prices.listPrice.ValueAsCurrency,_Val.prices.listPrice.currency])+'<br/>');
+      html.Add('Listenpreis: '+Format('%n %s',[_Val.prices.listPrice.ValueAsCurrency,HtmlEncode(_Val.prices.listPrice.currency)])+'<br/>');
     if (_Val.prices.netPrice.ValueAsCurrency > 0) then
-      html.Add('Einkaufspreis: '+Format('%n %s',[_Val.prices.netPrice.ValueAsCurrency,_Val.prices.netPrice.currency])+'<br/>');
+      html.Add('Einkaufspreis: '+Format('%n %s',[_Val.prices.netPrice.ValueAsCurrency,HtmlEncode(_Val.prices.netPrice.currency)])+'<br/>');
 
     html.Add('<br/>');
     if _Val.prices.rawMaterial.Count > 0 then
@@ -207,7 +306,9 @@ begin
       html.Add('<h3>Bilder</h3>');
     for i := 0 to _Val.pictures.Count-1 do
     begin
-      html.Add('<img src="'+HtmlEncode(IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail))+'"></img><br/>');
+      var pictureUrl : String := SafeUrl(IfThen(_Val.pictures[i].urlThumbnail.IsEmpty,_Val.pictures[i].url,_Val.pictures[i].urlThumbnail));
+      if pictureUrl <> '' then
+        html.Add('<img src="'+pictureUrl+'"/><br/>');
     end;
 
     html.Add('<br/>');
@@ -235,7 +336,11 @@ begin
     begin
       if _Val.documents[i].description <> '' then
         html.Add(HtmlEncode(_Val.documents[i].description)+'<br/>');
-      html.Add('<a href="'+HtmlEncode(_Val.documents[i].url)+'">'+HtmlEncode(_Val.documents[i].url)+'</a><br/>');
+      var documentUrl : String := SafeUrl(_Val.documents[i].url);
+      if documentUrl <> '' then
+        html.Add('<a href="'+documentUrl+'" rel="noopener noreferrer">'+documentUrl+'</a><br/>')
+      else
+        html.Add(HtmlEncode(_Val.documents[i].url)+'<br/>');
     end;
 
     if _Val.additional.attribute.Count > 0 then
@@ -252,11 +357,6 @@ begin
       end;
     end;
 
-    html.Add('');
-    html.Add('');
-    html.Add('');
-    html.Add('');
-    html.Add('');
     html.Add('</body>');
     html.Add('</html>');
 

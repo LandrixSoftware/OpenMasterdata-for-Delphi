@@ -38,8 +38,10 @@ uses
   System.SysUtils,
   System.Classes,
   System.IOUtils,
+  System.StrUtils,
   System.DateUtils,
-  intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas';
+  intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
+  intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas';
 
 var
   TestsRun : Integer = 0;
@@ -394,6 +396,82 @@ begin
   end;
 end;
 
+//Die HTML-Ausgabe darf keine aktiven Inhalte aus der Lieferantenantwort uebernehmen.
+procedure TestHtmlSanitizing;
+var
+  res : TOpenMasterdataAPI_Result;
+  err,html : String;
+
+  function RenderDescr(const _Descr : String) : String;
+  var
+    r : TOpenMasterdataAPI_Result;
+    e : String;
+  begin
+    Result := '';
+    r := Parse('{"descriptions":{"productDescr":'+_Descr+'}}',e);
+    if r = nil then
+      exit;
+    try
+      Result := TOpenMasterdataAPI_ViewHelper.AsHtml(r);
+    finally
+      r.Free;
+    end;
+  end;
+
+begin
+  Writeln('HTML-Ausgabe');
+
+  Check('AsHtml(nil) liefert Leerstring',TOpenMasterdataAPI_ViewHelper.AsHtml(nil) = '');
+
+  //Erlaubte Auszeichnung bleibt erhalten
+  html := RenderDescr('"<p>Zeile eins</p><ul><li>Punkt</li></ul>"');
+  Check('Absatz bleibt erhalten',ContainsText(html,'<p>Zeile eins</p>'),html);
+  Check('Liste bleibt erhalten',ContainsText(html,'<li>Punkt</li>'),html);
+
+  //Skripte und Ereignisattribute duerfen nicht durchkommen
+  html := RenderDescr('"<div><script>alert(1)</script></div>"');
+  Check('script-Tag entfernt',not ContainsText(html,'<script'),html);
+
+  html := RenderDescr('"<div><img src=x onerror =alert(1)></div>"');
+  Check('img mit onerror entfernt',not ContainsText(html,'onerror'),html);
+
+  html := RenderDescr('"<div><svg onload=alert(1)></svg></div>"');
+  Check('svg mit onload entfernt',not ContainsText(html,'onload'),html);
+
+  html := RenderDescr('"<div><p style=\"x\" onclick=\"evil()\">Text</p></div>"');
+  Check('Attribute werden entfernt',not ContainsText(html,'onclick'),html);
+  Check('Text bleibt erhalten',ContainsText(html,'Text'),html);
+
+  //Aktive URL-Schemata
+  res := Parse('{"additional":{"deepLink":"javascript:alert(1)"},'+
+               '"documents":[{"url":"javascript:alert(2)"}],'+
+               '"pictures":[{"url":"javascript:alert(3)"}]}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    //Der Wert darf als Text erscheinen, aber nie als aktive URL
+    Check('kein href mit javascript:',not ContainsText(html,'href="javascript:'),html);
+    Check('kein src mit javascript:',not ContainsText(html,'src="javascript:'),html);
+    Check('unsichere Dokument-URL wird nicht verlinkt',not ContainsText(html,'<a href="javascript'),html);
+  finally
+    res.Free;
+  end;
+
+  //Waehrung wird maskiert
+  res := Parse('{"prices":{"listPrice":{"value":"1.00","currency":"EUR<img src=x onerror=alert(1)>"}}}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('Waehrung maskiert',not ContainsText(html,'<img'),html);
+  finally
+    res.Free;
+  end;
+end;
+
 //Smoketest gegen die echten Lieferanten-Antworten, sofern vorhanden.
 procedure TestRealResponses(const _Folder : String);
 var
@@ -469,6 +547,8 @@ begin
     TestEnumCodes;
     Writeln;
     TestDocumentLanguage;
+    Writeln;
+    TestHtmlSanitizing;
     Writeln;
 
     if ParamCount > 0 then

@@ -32,6 +32,7 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, System.IOUtils,
   Vcl.StdCtrls, REST.Types, REST.Client, System.JSON, REST.Json,
   Winapi.WebView2, Winapi.ActiveX, Vcl.Edge,Vcl.CheckLst,
+  System.StrUtils, System.Net.URLClient,
   intf.OpenMasterdata,intf.OpenMasterdata.Types,intf.OpenMasterdata.View
   ;
 
@@ -62,6 +63,12 @@ type
   public
     Configuration : TMemIniFile;
     CurrentAuthorizationToken : String;
+    //Praefix aus Schema und Host des API-Endpunkts. Nur an diese Adresse
+    //darf der Zugriffstoken gesendet werden.
+    CurrentAuthorizationHost : String;
+    //Bereits am WebView registrierter Filter, damit er nicht mehrfach anfaellt
+    RegisteredResourceFilter : String;
+    function HostPrefixOf(const _URL : String) : String;
   end;
 
 var
@@ -243,11 +250,31 @@ begin
     profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
+//Liefert Schema und Host einer konfigurierten URL, etwa https://api.example
+function TMainForm.HostPrefixOf(const _URL : String) : String;
+var
+  uri : TURI;
+begin
+  Result := '';
+  if Trim(_URL) = '' then
+    exit;
+  try
+    uri := TURI.Create(_URL);
+  except
+    on E:Exception do
+      exit;
+  end;
+  if (uri.Scheme = '') or (uri.Host = '') then
+    exit;
+  Result := uri.Scheme+'://'+uri.Host;
+end;
+
 procedure TMainForm.EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
   Args: TWebResourceRequestedEventArgs);
 var
   request: ICoreWebView2WebResourceRequest;
-//  requestURI, responseHeaders, method: PWideChar;
+  requestURI: PWideChar;
+//  responseHeaders, method: PWideChar;
 //  response: ICoreWebView2WebResourceResponse;
 //  requestFilename, localFilename, payload: string;
   headers: ICoreWebView2HttpRequestHeaders;
@@ -255,10 +282,25 @@ var
 //    core:ICoreWebView2;
 //    sett:ICoreWebView2Settings;
 begin
-  if CurrentAuthorizationToken = '' then
+  if (CurrentAuthorizationToken = '') or (CurrentAuthorizationHost = '') then
     exit;
   Args.ArgsInterface.Get_Request(request);
-  //request.Get_uri(requestURI);
+  if request = nil then
+    exit;
+
+  //Die angezeigte Seite enthaelt Bild- und Dokumentadressen aus der
+  //Lieferantenantwort. Ohne diese Pruefung ginge der Zugriffstoken an jeden
+  //darin genannten Host.
+  requestURI := nil;
+  if not Succeeded(request.Get_uri(requestURI)) or (requestURI = nil) then
+    exit;
+  try
+    if not StartsText(CurrentAuthorizationHost,String(requestURI)) then
+      exit;
+  finally
+    CoTaskMemFree(requestURI);
+  end;
+
   request.Get_Headers(headers);
   headers.SetHeader('Authorization',PChar('Bearer '+CurrentAuthorizationToken));
 
@@ -299,6 +341,7 @@ var
 begin
   Memo1.Clear;
   CurrentAuthorizationToken := '';
+  CurrentAuthorizationHost := '';
   ListBox2.Clear;
 
   if ComboBox1.ItemIndex < 0 then
@@ -335,8 +378,14 @@ begin
 
     html := TOpenMasterdataAPI_ViewHelper.AsHtml(supplierPid);
     CurrentAuthorizationToken := client.GetCurrentAuthorizationToken;
+    CurrentAuthorizationHost := HostPrefixOf(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
 
-    EdgeBrowser1.AddWebResourceRequestedFilter('*', COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+    //Filter nur fuer den API-Host registrieren, nicht fuer '*'
+    if (CurrentAuthorizationHost <> '') and (RegisteredResourceFilter <> CurrentAuthorizationHost) then
+    begin
+      EdgeBrowser1.AddWebResourceRequestedFilter(PChar(CurrentAuthorizationHost+'*'), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+      RegisteredResourceFilter := CurrentAuthorizationHost;
+    end;
     EdgeBrowser1.NavigateToString(html);
 
     for i := 0 to supplierPid.pictures.Count-1 do

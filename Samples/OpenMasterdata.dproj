@@ -82,7 +82,7 @@
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <PostBuildEvent><![CDATA[copy /y “$(BDS)\Redist\win32\WebView2Loader.dll” “$(OUTPUTDIR)”
+        <PostBuildEvent><![CDATA[if exist "$(BDS)\Redist\win32\WebView2Loader.dll" copy /y "$(BDS)\Redist\win32\WebView2Loader.dll" "$(OUTPUTDIR)"
 $(PostBuildEvent)]]></PostBuildEvent>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
         <PostBuildEventCancelOnError>false</PostBuildEventCancelOnError>
@@ -94,7 +94,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <PostBuildEvent><![CDATA[copy /y “$(BDS)\Redist\win64\WebView2Loader.dll” “$(OUTPUTDIR)”
+        <PostBuildEvent><![CDATA[if exist "$(BDS)\Redist\win64\WebView2Loader.dll" copy /y "$(BDS)\Redist\win64\WebView2Loader.dll" "$(OUTPUTDIR)"
 $(PostBuildEvent)]]></PostBuildEvent>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
         <PostBuildEventCancelOnError>false</PostBuildEventCancelOnError>
@@ -1134,7 +1134,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /y “$(BDS)\Redist\win32\WebView2Loader.dll” “$(OUTPUTDIR)”</PostBuildEvent>
+        <PostBuildEvent>if exist "$(BDS)\Redist\win32\WebView2Loader.dll" copy /y "$(BDS)\Redist\win32\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
@@ -1142,7 +1142,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /y “$(BDS)\Redist\win64\WebView2Loader.dll” “$(OUTPUTDIR)”</PostBuildEvent>
+        <PostBuildEvent>if exist "$(BDS)\Redist\win64\WebView2Loader.dll" copy /y "$(BDS)\Redist\win64\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win32'">
@@ -1150,7 +1150,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /y “$(BDS)\Redist\win32\WebView2Loader.dll” “$(OUTPUTDIR)”</PostBuildEvent>
+        <PostBuildEvent>if exist "$(BDS)\Redist\win32\WebView2Loader.dll" copy /y "$(BDS)\Redist\win32\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
@@ -1158,7 +1158,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /y “$(BDS)\Redist\win64\WebView2Loader.dll” “$(OUTPUTDIR)”</PostBuildEvent>
+        <PostBuildEvent>if exist "$(BDS)\Redist\win64\WebView2Loader.dll" copy /y "$(BDS)\Redist\win64\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
 </Project>
