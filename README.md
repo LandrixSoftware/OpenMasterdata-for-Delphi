@@ -38,6 +38,80 @@ Aktuell berücksichtigt der Loader insbesondere folgende Fälle:
  - Unterstützung zusätzlicher Dokumenttypen wie `PL`.
  - Unterstützung von Rohstofflisten unter `prices.rawMaterial`, inklusive `weightBasis`, `basisUnit`, `proportionByWeight`, `proportionUnit`, `quotationOfRawMaterial` und `currentQuotationOfRawMaterial`.
  - Sichtbare HTML-Ausgabe für Alternativartikel, Nachfolgeartikel, Zubehörartikel und Rohstoffangaben.
+ - JSON-`null` wird als leerer Wert behandelt und nicht als Text `null` übernommen.
+ - GTIN-Werte mit führender Null werden verlustfrei gelesen, obwohl sie formal kein gültiges JSON sind.
+ - Achtstellige Datumsangaben werden sowohl als `YYYYMMDD` als auch als `DDMMYYYY` erkannt.
+ - Preisstaffeln bleiben vollständig erhalten: `listPrice`, `netPrice` und `rrp` führen weiterhin die erste Stufe, alle Stufen stehen zusätzlich in `listPriceScale`, `netPriceScale` und `rrpScale`.
+ - Fallback von `weight` auf die Spec-Schreibweise `weigth` in `logistics`, analog zum bereits vorhandenen `heigth`.
+ - Unterstützung von `additional.attributes` im Plural, wie ihn einzelne Lieferanten senden.
+ - `Document.language` und `LinePrice.descriptiion` aus der Spec 9.0.0.
+ - Der optionale Query-Parameter `customerId` lässt sich über `SetCustomerId` setzen.
+ - Die Sonderstatus `950` und `951` liefern laut Spezifikation ein vollständiges Produkt, nämlich den Alternativ- bzw. Nachfolgeartikel. Deren Antwort wird geparst; der Statuscode bleibt über `GetLastErrorCode` abfragbar.
+
+## Wiederholung bei Überlast
+
+Antworten mit `429`, `502`, `503` oder `504` werden standardmäßig zweimal wiederholt, mit 1 und 2 Sekunden Abstand. Alle übrigen Statuscodes werden nicht wiederholt, weil sie beim zweiten Versuch dieselbe Antwort ergäben.
+
+Nennt der Server im Header `Retry-After` eine Wartezeit in Sekunden, hat diese Vorrang. Liegt sie über der zugestandenen Obergrenze von 10 Sekunden, wird **nicht** gewartet, sondern der Fehler gemeldet. Hintergrund: der Aufruf blockiert, und eine Anwendung, die eine Minute lang nicht reagiert, wirkt abgestürzt. Der Aufrufer kann anhand von `GetLastErrorCode` selbst entscheiden, ob und wann er es erneut versucht.
+
+Beides lässt sich anpassen, etwa für Hintergrunddienste ohne Oberfläche:
+
+```pascal
+client.SetRetryPolicy(3,60); //drei Wiederholungen, bis zu 60 Sekunden Wartezeit
+client.SetRetryPolicy(0,0);  //Wiederholungen abschalten
+```
+
+Bei Sammelabrufen ist zu beachten, dass sich die Wartezeiten über alle Artikel summieren.
+
+## Felder ab OpenMasterdata 11
+
+Die folgenden Felder sind noch nicht Teil der umgesetzten Version 9.0.2. Sie werden bereits gelesen, damit nichts verlorengeht, sobald ein Echtsystem sie liefert. In Antworten nach 9.0.2 bleiben sie leer.
+
+ - `status` je Artikel (`200`, `404`, `950`, `951`, `952`, `960`), als Zahl in `TOpenMasterdataAPI_Result.status`. `0` bedeutet, dass die Antwort kein Statusfeld enthält.
+ - `prices.promotionalPrice` als Liste von Aktionspreisen mit `startOfValidity` und `endOfValidity`.
+ - `lowerBound` an Preisen, die untere Staffelgrenze. In OM 11 ist `netPrice` eine Staffel aus `BulkPrice`; die Werte stehen in `netPriceScale`.
+ - `basic.noOrderBefore`, `basic.noDeliveryBefore`, `basic.noMarketingBefore`.
+ - `basic.sparepartsystemURL` und `basic.sparepartsystemdescription`.
+ - `additional.accessorieGroupIdManufacturer` und `additional.accessorieGroupDescrManufacturer`.
+
+Da die Bibliothek künftig gegen reale Antworten statt gegen die Dokumentation abgeglichen wird, sollten neue Beispiel-Responses immer über die Tests geprüft werden.
+
+## Tests
+
+Unter `Tests` liegt ein Konsolenprogramm mit Regressionstests für den Parser und die HTML-Ausgabe.
+
+```
+Tests\run-tests.bat
+```
+
+Das Skript sucht eine installierte Delphi-Version, kompiliert die Tests und führt sie aus. Der Rückgabewert ist 0, wenn alle Tests bestanden wurden. Liegt der Ordner `Testresponses` vor, wird zusätzlich jede dort abgelegte Lieferanten-Antwort als Smoketest geparst.
+
+Neue Beispiel-Responses lassen sich damit direkt gegen die vorhandene Parserlogik prüfen.
+
+## Zugänge prüfen
+
+Die Tests unter `Tests` arbeiten ohne Netzwerk. Ob die hinterlegten Zugänge noch gelten, prüft ein zweites Konsolenprogramm:
+
+```
+Samples\LoginTest\run-logintest.bat
+```
+
+Es liest `Samples\configuration.ini`, meldet sich bei jedem darin konfigurierten Lieferanten an und ruft eine Artikelnummer aus `ArtNoAsCommatext` ab. Ausgegeben werden nur der Endpunkt, das Ergebnis und im Fehlerfall die Antwort des Servers — nicht die Zugangsdaten und nicht die OAuth-Antwort, die Zugriffs- und Refresh-Token im Klartext enthält.
+
+```
+run-logintest.bat Sonepar        nur Zugänge, deren Name das enthält
+run-logintest.bat Sonepar cc     zusätzlich den Grant-Type übersteuern
+```
+
+Der zweite Parameter (`pw` oder `cc`) hilft bei der Eingrenzung, wenn ein Endpunkt den konfigurierten Grant-Type ablehnt. Der Rückgabewert ist 0, wenn sich alle geprüften Zugänge anmelden konnten und einen Artikel geliefert haben.
+
+Abgefragt werden die für den Lieferanten konfigurierten Datenpakete in einem Aufruf; die Antwort wird eingelesen und es wird gemeldet, welche Bereiche tatsächlich gefüllt sind. Scheitert dieser Abruf, sucht das Programm die Ursache: es wiederholt zuerst denselben Aufruf unverändert — gelingt er dann, war die Störung vorübergehend —, probiert danach den jeweils anderen `DataPackageSendMode` und schließlich jedes Datenpaket einzeln. Damit lässt sich unterscheiden, ob ein Lieferant die Paketliste anders erwartet oder ob er ein bestimmtes Datenpaket nicht ausliefern kann.
+
+Welche Datenpakete abgefragt werden, steuert der optionale Schlüssel `DataPackages` je Lieferant, etwa `DataPackages=basic,descriptions,logistics,pictures,documents`. Als Trenner gelten Komma, Semikolon, senkrechter Strich, Leerzeichen, Tabulator und Zeilenumbruch. Das hilft bei Lieferanten, die ein einzelnes Paket nicht ausliefern können und die gesamte Abfrage daran scheitern lassen.
+
+Fehlt der Schlüssel, ist er leer oder nennt er kein einziges bekanntes Paket, werden alle Pakete angefragt — eine leere Auswahl würde jede Abfrage scheitern lassen. Nicht erkannte Namen werden übergangen und zusätzlich gemeldet, damit ein Tippfehler nicht unbemerkt bleibt.
+
+Als Vorlage für die Konfiguration dient `Samples\configuration.sample.ini`. Die echte `configuration.ini` enthält Zugangsdaten und ist von der Versionsverwaltung ausgenommen.
 
 ## Hinweise zu Rohstoffangaben
 
@@ -58,6 +132,12 @@ Weitere Informationen unter
  - https://itek-branchenwissen.atlassian.net/wiki/spaces/DS/pages/535593021/Open+Masterdata
 
 # Lieferanten mit Open Masterdata-Unterstützung
+
+Die Tabelle hält fest, was die Lieferanten in der Praxis erwarten. Die Spaltennamen entsprechen den Schlüsseln in `configuration.ini`, ausgewertet wird davon derzeit allein `CustomernumberRequired`; `ClientIDRequired`, `UsernameRequired` und `ClientSecretRequired` sind Notizen für die Einrichtung und werden vom Code nicht gelesen.
+
+`CustomernumberRequired` entscheidet, ob die Kundennummer Teil der Anmeldung ist. Verlangt ein Lieferant sie, wird sie mit einem Tabulator getrennt an den Benutzernamen gehängt; ist kein Benutzername gesetzt, geht sie allein als `username` hinaus. Verlangt er sie nicht, muss sie beim Login außen vor bleiben, sonst weist der Server die Zugangsdaten zurück. Fehlt der Schlüssel, wird eine eingetragene Kundennummer gesendet.
+
+In der Konfiguration sind `True`/`False` die üblichen Werte; `ja`/`nein` werden ebenfalls verstanden.
 
 | Lieferant | ClientIDRequired | GrantType | DataPackageSendMode | UsernameRequired | CustomerNumberRequired | ClientSecretRequired |
 |----------|----------|----------|----------|----------|----------|----------|
@@ -99,3 +179,18 @@ software distributed under the License is distributed on an
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
+
+## Hinweise zur Aktualisierung bestehender Anwendungen
+
+Zwei Änderungen können bestehenden Code betreffen:
+
+ - Die Objekt- und Listen-Properties der Datentypen sind schreibgeschützt (`read` statt `read/write`), etwa `prices.listPrice`, `logistics.measureA` oder `additional.attribute`. Eine Zuweisung von außen hätte die im Konstruktor erzeugte Instanz lecken lassen. Die Objekte selbst sind unverändert veränderbar, nur das Ersetzen der Instanz entfällt.
+ - Die Aufzählungstypen `TOpenMasterdataAPI_CarryingCategory`, `TOpenMasterdataAPI_PackageType` und `TOpenMasterdataAPI_RawMaterial` haben neue Werte erhalten. Dadurch verschieben sich die Ordinalwerte der bestehenden Einträge. Wer diese Werte als Zahl gespeichert hat, muss die Daten umsetzen. `omdCarryingCategory_None` steht neu an erster Stelle, weil `omdCarryingCategory_0` eine gültige Beförderungskategorie ist und nicht „nicht angegeben" bedeutet.
+
+Geändertes Verhalten bei gleicher Signatur:
+
+ - `LoadFromJson` und `TryLoadFromJson` leeren das Ergebnisobjekt vor jedem Ladevorgang. Ein wiederverwendetes Objekt behält damit keine Werte des zuvor geladenen Artikels mehr.
+ - `NewOpenMasterdataConnection` übernimmt bei bereits bekanntem Verbindungsnamen die übergebenen Zugangsdaten. Weichen sie ab, wird der bisherige Token verworfen.
+ - `GetLastErrorCode` liefert nach einem erfolgreichen Abruf 0. Bei den Sonderstatus 950 und 951 bleibt der Statuscode erhalten, obwohl der Abruf als erfolgreich gilt.
+ - `AsHtml` reicht Lieferanten-HTML nicht mehr unverändert durch. Nicht freigegebene Tags und sämtliche Attribute werden entfernt, Adressen nur mit den Schemata `http`, `https` und `mailto` verlinkt.
+ - Fehlgeschlagene Bild- und Dokumentdownloads werden nicht mehr zwischengespeichert, sondern beim nächsten Zugriff erneut versucht.

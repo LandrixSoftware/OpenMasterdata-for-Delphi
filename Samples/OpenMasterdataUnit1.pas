@@ -32,6 +32,7 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, System.IOUtils,
   Vcl.StdCtrls, REST.Types, REST.Client, System.JSON, REST.Json,
   Winapi.WebView2, Winapi.ActiveX, Vcl.Edge,Vcl.CheckLst,
+  System.StrUtils, System.Net.URLClient,
   intf.OpenMasterdata,intf.OpenMasterdata.Types,intf.OpenMasterdata.View
   ;
 
@@ -62,6 +63,22 @@ type
   public
     Configuration : TMemIniFile;
     CurrentAuthorizationToken : String;
+    //Schema, Host und Port des API-Endpunkts. Nur an genau diese Adresse
+    //darf der Zugriffstoken gesendet werden.
+    CurrentAuthorizationScheme : String;
+    CurrentAuthorizationHost : String;
+    CurrentAuthorizationPort : Integer;
+    //Bereits am WebView registrierte Filter, damit keiner doppelt anfaellt
+    RegisteredResourceFilters : TStringList;
+    //Die Kundennummer gehoert nur dann in die Zugangsdaten, wenn der
+    //Lieferant sie verlangt. Sonst haengt die Bibliothek sie an den
+    //Benutzernamen an und der Login schlaegt fehl.
+    function ConfiguredFlag(const _Section,_Key : String; _Default : Boolean) : Boolean;
+    function ConfiguredCustomerNumber(const _Section : String) : String;
+    //Setzt die Haken der Datenpaketliste nach der Konfiguration
+    procedure ApplyConfiguredDataPackages(const _Section : String);
+    procedure SetAuthorizationTarget(const _URL : String);
+    function IsAuthorizationTarget(const _RequestUri : String) : Boolean;
   end;
 
 var
@@ -75,6 +92,8 @@ procedure TMainForm.FormCreate(Sender: TObject);
 var
   basePath,configurationFilename : String;
 begin
+  RegisteredResourceFilters := TStringList.Create;
+
   if (Pos('Samples\Win32',Application.ExeName)>0) or (Pos('Samples\Win64',Application.ExeName)>0) then
     basePath := ExtractFilePath(ExtractFileDir(ExtractFileDir(Application.ExeName)))
   else
@@ -97,6 +116,7 @@ begin
   //ClientScope=openMasterdata
   //GrantType=password or client_credentials
   //DataPackageSendMode=pipedelimited or exploded
+  //DataPackages=basic,prices,...  (leer oder fehlend: alle)
   //UsernameRequired=True or False
   //CustomernumberRequired=True or False
   //ClientSecretRequired=True or False
@@ -107,12 +127,6 @@ begin
   //ArtNoAsCommatext=123,456
 
   Configuration.ReadSections(ComboBox1.Items);
-
-  if ComboBox1.Items.Count>0 then
-  begin
-    ComboBox1.ItemIndex := 0;
-    ComboBox1.OnSelect(nil);
-  end;
 
   Left := 50;
   Top := 50;
@@ -127,8 +141,14 @@ begin
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_sparepartlists));
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_pictures));
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_documents));
-  for var i : Integer := 0 to CheckListBox1.Items.Count-1 do
-    CheckListBox1.Checked[i] := true;
+
+  //Erst jetzt den Lieferanten auswaehlen: ComboBox1Select setzt die Haken nach
+  //der Konfiguration, dafuer muessen die Eintraege bereits vorhanden sein.
+  if ComboBox1.Items.Count>0 then
+  begin
+    ComboBox1.ItemIndex := 0;
+    ComboBox1.OnSelect(nil);
+  end;
 
   EdgeBrowser1.UserDataFolder := ExtractFilePath(Application.ExeName);
   EdgeBrowser1.Navigate('about:blank');
@@ -154,6 +174,7 @@ end;
 procedure TMainForm.FormDestroy(Sender: TObject);
 begin
   if Assigned(Configuration) then begin Configuration.Free; Configuration := nil; end;
+  if Assigned(RegisteredResourceFilters) then begin RegisteredResourceFilters.Free; RegisteredResourceFilters := nil; end;
 end;
 
 procedure TMainForm.Button1Click(Sender: TObject);
@@ -172,7 +193,7 @@ begin
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
-               Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
+               ConfiguredCustomerNumber(ComboBox1.Text),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
@@ -206,6 +227,7 @@ end;
 
 procedure TMainForm.ComboBox1Select(Sender: TObject);
 begin
+  ApplyConfiguredDataPackages(ComboBox1.Text);
   ListBox1.Items.CommaText := Configuration.ReadString(ComboBox1.Text,'ArtNoAsCommatext','');
   if ListBox1.Items.Count > 0 then
     ListBox1.ItemIndex := 0;
@@ -218,6 +240,7 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
+  Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'DataPackages',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'UsernameRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'CustomernumberRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecretRequired',''));
@@ -243,11 +266,109 @@ begin
     profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
+//Liest einen Ja-Nein-Schluessel. StrToBoolDef versteht nur True, False und
+//Zahlen; in Konfigurationen und in der Lieferantentabelle der Dokumentation
+//steht aber auch ja und nein. Ein nicht erkannter Wert wuerde stillschweigend
+//zur Vorgabe, was hier das Gegenteil des Gemeinten bedeuten kann.
+function TMainForm.ConfiguredFlag(const _Section,_Key : String;
+  _Default : Boolean) : Boolean;
+var
+  configuredValue : String;
+begin
+  configuredValue := Trim(Configuration.ReadString(_Section,_Key,''));
+  if configuredValue = '' then
+    exit(_Default);
+  if MatchText(configuredValue,['true','ja','yes','y','j','1','-1']) then
+    exit(true);
+  if MatchText(configuredValue,['false','nein','no','n','0']) then
+    exit(false);
+  Result := _Default;
+end;
+
+function TMainForm.ConfiguredCustomerNumber(const _Section : String) : String;
+begin
+  //CustomernumberRequired steuert, ob der Lieferant die Kundennummer als
+  //Teil der Anmeldung erwartet. Steht in der Konfiguration eine Nummer,
+  //die der Lieferant nicht verlangt, wuerde sie den Benutzernamen
+  //verfaelschen.
+  //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
+  if not ConfiguredFlag(_Section,'CustomernumberRequired',true) then
+    exit('');
+  Result := Configuration.ReadString(_Section,'Customernumber','');
+end;
+
+procedure TMainForm.ApplyConfiguredDataPackages(const _Section : String);
+var
+  packages : TOpenMasterdataAPI_DataPackages;
+  unknownNames : TStringList;
+  i : Integer;
+  package : TOpenMasterdataAPI_DataPackage;
+begin
+  unknownNames := TStringList.Create;
+  try
+    //Ohne den Schluessel bleibt es bei allen Paketen
+    packages := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+                  Configuration.ReadString(_Section,'DataPackages',''),
+                  TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,
+                  unknownNames);
+
+    for i := 0 to CheckListBox1.Items.Count-1 do
+      if TOpenMasterdataAPI_DataPackageHelper.TryDataPackageFromString(
+           CheckListBox1.Items[i],package) then
+        CheckListBox1.Checked[i] := package in packages;
+
+    //Ein Tippfehler in der Konfiguration bliebe sonst unbemerkt
+    if unknownNames.Count > 0 then
+      MessageDlg('Unbekannte Datenpakete in der Konfiguration: '+
+        unknownNames.CommaText, mtWarning, [mbOK], 0);
+  finally
+    unknownNames.Free;
+  end;
+end;
+
+//Zerlegt die konfigurierte API-Adresse in Schema, Host und Port. Ein reiner
+//Praefixvergleich reicht hier nicht: "https://api.example" ist auch ein
+//Praefix von "https://api.example.angreifer.tld", und dorthin duerfte der
+//Zugriffstoken niemals gehen.
+procedure TMainForm.SetAuthorizationTarget(const _URL : String);
+var
+  uri : TURI;
+begin
+  CurrentAuthorizationScheme := '';
+  CurrentAuthorizationHost := '';
+  CurrentAuthorizationPort := 0;
+
+  if Trim(_URL) = '' then
+    exit;
+  try
+    uri := TURI.Create(_URL);
+  except
+    on E:Exception do
+      exit;
+  end;
+  if (uri.Scheme = '') or (uri.Host = '') then
+    exit;
+
+  CurrentAuthorizationScheme := uri.Scheme;
+  CurrentAuthorizationHost := uri.Host;
+  CurrentAuthorizationPort := uri.Port;
+end;
+
+//Vergleicht Schema, Host und Port der angefragten Adresse mit dem
+//API-Endpunkt. Nur bei vollstaendiger Uebereinstimmung darf der Token mit.
+//Die Pruefung selbst liegt in der Bibliothek, weil sie dort getestet wird.
+function TMainForm.IsAuthorizationTarget(const _RequestUri : String) : Boolean;
+begin
+  Result := TOpenMasterdataApiClient.IsSameOrigin(_RequestUri,
+    CurrentAuthorizationScheme,CurrentAuthorizationHost,CurrentAuthorizationPort);
+end;
+
 procedure TMainForm.EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
   Args: TWebResourceRequestedEventArgs);
 var
   request: ICoreWebView2WebResourceRequest;
-//  requestURI, responseHeaders, method: PWideChar;
+  requestURI: PWideChar;
+//  responseHeaders, method: PWideChar;
 //  response: ICoreWebView2WebResourceResponse;
 //  requestFilename, localFilename, payload: string;
   headers: ICoreWebView2HttpRequestHeaders;
@@ -255,11 +376,27 @@ var
 //    core:ICoreWebView2;
 //    sett:ICoreWebView2Settings;
 begin
-  if CurrentAuthorizationToken = '' then
+  if (CurrentAuthorizationToken = '') or (CurrentAuthorizationHost = '') then
     exit;
   Args.ArgsInterface.Get_Request(request);
-  //request.Get_uri(requestURI);
-  request.Get_Headers(headers);
+  if request = nil then
+    exit;
+
+  //Die angezeigte Seite enthaelt Bild- und Dokumentadressen aus der
+  //Lieferantenantwort. Ohne diese Pruefung ginge der Zugriffstoken an jeden
+  //darin genannten Host.
+  requestURI := nil;
+  if not Succeeded(request.Get_uri(requestURI)) or (requestURI = nil) then
+    exit;
+  try
+    if not IsAuthorizationTarget(String(requestURI)) then
+      exit;
+  finally
+    CoTaskMemFree(requestURI);
+  end;
+
+  if not Succeeded(request.Get_Headers(headers)) or (headers = nil) then
+    exit;
   headers.SetHeader('Authorization',PChar('Bearer '+CurrentAuthorizationToken));
 
   //headers.SetHeader('User-Agent', PChar('TestBrowserDownload v' + GetVersion));
@@ -299,6 +436,9 @@ var
 begin
   Memo1.Clear;
   CurrentAuthorizationToken := '';
+  CurrentAuthorizationScheme := '';
+  CurrentAuthorizationHost := '';
+  CurrentAuthorizationPort := 0;
   ListBox2.Clear;
 
   if ComboBox1.ItemIndex < 0 then
@@ -314,7 +454,7 @@ begin
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
                Configuration.ReadString(ComboBox1.Text,'Username',''),
                Configuration.ReadString(ComboBox1.Text,'Password',''),
-               Configuration.ReadString(ComboBox1.Text,'Customernumber',''),
+               ConfiguredCustomerNumber(ComboBox1.Text),
                Configuration.ReadString(ComboBox1.Text,'ClientID',''),
                Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
                Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
@@ -335,8 +475,28 @@ begin
 
     html := TOpenMasterdataAPI_ViewHelper.AsHtml(supplierPid);
     CurrentAuthorizationToken := client.GetCurrentAuthorizationToken;
+    SetAuthorizationTarget(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
 
-    EdgeBrowser1.AddWebResourceRequestedFilter('*', COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+    //Filter nur fuer den API-Host registrieren, nicht fuer '*'. Der Schraegstrich
+    //begrenzt den Host, sonst matcht der Filter auch api.example.angreifer.tld.
+    //Die eigentliche Absicherung leistet IsAuthorizationTarget im Handler.
+    if CurrentAuthorizationHost <> '' then
+    begin
+      //Der Port gehoert in den Filter. Fehlt er bei einem abweichenden Port,
+      //feuert das Ereignis nicht, der Token fehlt und der Server antwortet 401.
+      //Den Standardport laesst WebView2 in der Adresse weg, deshalb entfaellt
+      //er auch hier.
+      var resourceFilter : String := CurrentAuthorizationScheme+'://'+CurrentAuthorizationHost;
+      if not (((CurrentAuthorizationPort = 443) and SameText(CurrentAuthorizationScheme,'https')) or
+              ((CurrentAuthorizationPort = 80) and SameText(CurrentAuthorizationScheme,'http'))) then
+        resourceFilter := resourceFilter+':'+IntToStr(CurrentAuthorizationPort);
+      resourceFilter := resourceFilter+'/*';
+      if RegisteredResourceFilters.IndexOf(resourceFilter) < 0 then
+      begin
+        EdgeBrowser1.AddWebResourceRequestedFilter(PChar(resourceFilter), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+        RegisteredResourceFilters.Add(resourceFilter);
+      end;
+    end;
     EdgeBrowser1.NavigateToString(html);
 
     for i := 0 to supplierPid.pictures.Count-1 do

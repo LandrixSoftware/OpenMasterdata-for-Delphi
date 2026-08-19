@@ -219,11 +219,21 @@ var
   i : Integer;
   localFormatSettings : TFormatSettings;
 begin
+  //Vollstaendig zuruecksetzen, sonst bleiben Preise und Beschreibung des
+  //zuvor geladenen Artikels stehen
   supplierPid := '';
   documents.Clear;
-  //prices.
-  //descriptions.
   pictures.Clear;
+  prices.listPrice.value := 0;
+  prices.listPrice.currency := '';
+  prices.listPrice.basis := 0;
+  prices.listPrice.quantityUnit := '';
+  prices.netPrice.value := 0;
+  prices.netPrice.currency := '';
+  prices.netPrice.basis := 0;
+  prices.netPrice.quantityUnit := '';
+  prices.taxCode := 0;
+  descriptions.productDescr := '';
   if _Val = nil then
     exit;
   supplierPid := _Val.supplierPid;
@@ -241,6 +251,8 @@ begin
   localFormatSettings.DecimalSeparator := '.';
   localFormatSettings.ThousandSeparator := ',';
   //Buderus,...
+  //Fehlt der Listenpreis, dient die unverbindliche Preisempfehlung als Ersatz.
+  //Sie kommt je nach Lieferant unter prices.rrp oder unter basic.rrp.
   if (StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings) = 0) and
      (StrToCurrDef(_Val.prices.rrp.value,0,localFormatSettings) <> 0) then
   begin
@@ -248,6 +260,14 @@ begin
     prices.listPrice.currency := _Val.prices.rrp.currency;
     prices.listPrice.basis := _Val.prices.rrp.basis;
     prices.listPrice.quantityUnit := _Val.prices.rrp.quantityUnit;
+  end else
+  if (StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings) = 0) and
+     (StrToCurrDef(_Val.basic.rrp.value,0,localFormatSettings) <> 0) then
+  begin
+    prices.listPrice.value := StrToCurrDef(_Val.basic.rrp.value,0,localFormatSettings);
+    prices.listPrice.currency := _Val.basic.rrp.currency;
+    prices.listPrice.basis := _Val.basic.rrp.basis;
+    prices.listPrice.quantityUnit := _Val.basic.rrp.quantityUnit;
   end else
   begin
     prices.listPrice.value := StrToCurrDef(_Val.prices.listPrice.value,0,localFormatSettings);
@@ -455,6 +475,10 @@ begin
   begin
     picture := TMemoryStream.Create;
     Result := TOpenMasterdataHelper.GetStreamFromURL(url,picture);
+    //Ein fehlgeschlagener Download darf nicht zwischengespeichert werden, sonst
+    //gilt der Fehlertext spaeter als Bild und es wird nie erneut versucht
+    if not Result then
+      FreeAndNil(picture);
   end else
   begin
     Result := picture.Size > 0;
@@ -476,6 +500,8 @@ begin
   begin
     pictureThumbnail := TMemoryStream.Create;
     Result := TOpenMasterdataHelper.GetStreamFromURL(urlThumbnail,pictureThumbnail);
+    if not Result then
+      FreeAndNil(pictureThumbnail);
   end else
   begin
     Result := pictureThumbnail.Size > 0;
@@ -526,6 +552,8 @@ begin
   begin
     document := TMemoryStream.Create;
     Result := TOpenMasterdataHelper.GetStreamFromURL(url,document);
+    if not Result then
+      FreeAndNil(document);
   end else
   begin
     Result := document.Size > 0;

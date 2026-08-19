@@ -28,7 +28,7 @@ interface
 
 uses
   System.Classes,System.SysUtils,System.IOUtils,DateUtils,System.StrUtils
-  ,System.Generics.Collections,System.Generics.Defaults
+  ,System.Generics.Collections,System.Generics.Defaults,System.RegularExpressions
   ,System.Json,REST.Json
   ;
 
@@ -85,6 +85,16 @@ type
   public
     class function DataPackageAsString(_Val : TOpenMasterdataAPI_DataPackage) : String;
     class function DataPackagesAsString(_Val : TOpenMasterdataAPI_DataPackages) : String;
+    class function TryDataPackageFromString(const _Val : String;
+      out _DataPackage : TOpenMasterdataAPI_DataPackage) : Boolean;
+    //Liest eine Auswahl aus einer Aufzaehlung wie "basic,prices,pictures".
+    //Als Trenner gelten Komma, Semikolon, senkrechter Strich und Leerzeichen.
+    //Ist die Angabe leer oder nennt sie kein bekanntes Paket, gilt _Default:
+    //eine leere Auswahl wuerde jede Abfrage scheitern lassen. Nicht erkannte
+    //Namen sammelt _UnknownNames, damit der Aufrufer darauf hinweisen kann.
+    class function DataPackagesFromString(const _Val : String;
+      _Default : TOpenMasterdataAPI_DataPackages;
+      _UnknownNames : TStrings = nil) : TOpenMasterdataAPI_DataPackages;
   end;
 
   TOpenMasterdataAPI_Document = class
@@ -97,6 +107,7 @@ type
     Furl: String;
     Fdescription: String;
     FsortOrder: Integer;
+    Flanguage: String;
   public
     property url : String read Furl write Furl;
     property urlThumbnail : String read FurlThumbnail write FurlThumbnail;
@@ -106,6 +117,7 @@ type
     property size : Integer read Fsize write Fsize; //Dokumentgröße in Byte
     property filename : String read Ffilename write Ffilename; //max 256 Dateiname
     property hash : String read Fhash write Fhash;
+    property language : String read Flanguage write Flanguage; //Sprache(n) des Dokuments, bei mehreren kommagetrennt
   end;
 
   TOpenMasterdataAPI_DocumentList = class(TObjectList<TOpenMasterdataAPI_Document>)
@@ -253,6 +265,8 @@ type
     FproductGroupIdManufacturer: String;
     FenergyEfficiencyClass: String;
     FbonusGroupDescrManufacturer: String;
+    FaccessorieGroupIdManufacturer: String;
+    FaccessorieGroupDescrManufacturer: String;
     FproductGroupDescrManufacturer: String;
   public
     constructor Create;
@@ -261,8 +275,8 @@ type
     property minOrderQuantity : double read FminOrderQuantity write FminOrderQuantity; //Mindestbestellmenge
     property minOrderUnit : String read FminOrderUnit write FminOrderUnit; //Units (Mengeneinheiten) -- Code Beschreibung\n- CMK = Quadratzentimeter\n- CMQ = Kubikzentimeter\n- CMT = Zentimeter\n- DZN = Dutzend\n- GRM = Gramm\n- HLT = Hektoliter\n- KGM = Kilogramm\n- KTM = Kilometer\n- LTR = Liter\n- MMT = Millimeter\n- MTK = Quadratmeter\n- MTQ = Kubikmeter\n- MTR = Meter\n- PCE = Stück\n- PR = Paar\n- SET = Satz\n- TNE = Tonne
     property articleNumberCatalogue : String read FarticleNumberCatalogue write FarticleNumberCatalogue; //max 15 Werksartikelnummer Katalog
-    property alternativeProduct : TOpenMasterdataAPI_AlternativeProductList read FalternativeProduct write FalternativeProduct;
-    property followupProduct : TOpenMasterdataAPI_FollowupProductList read FfollowupProduct write FfollowupProduct;
+    property alternativeProduct : TOpenMasterdataAPI_AlternativeProductList read FalternativeProduct;
+    property followupProduct : TOpenMasterdataAPI_FollowupProductList read FfollowupProduct;
     property deepLink : String read FdeepLink write FdeepLink; //max 256 Deeplink zum Artikel
     property expiringProduct : Boolean read FexpiringProduct write FexpiringProduct; //enum" : [ true, "Yes-Successor", false ] Auslaufartikel\n  - Yes = Artikel ist Auslauf\n  - Yes-Successor = Artikel ist Auslauf und Nachfolgeartikel existiert\n  - No = Artikel ist nicht Auslauf
     property expiringProductState : String read FexpiringProductState write FexpiringProductState;
@@ -277,14 +291,19 @@ type
     property discountGroupDescrManufacturer : String read FdiscountGroupDescrManufacturer write FdiscountGroupDescrManufacturer;
     property bonusGroupIdManufacturer : String read FbonusGroupIdManufacturer write FbonusGroupIdManufacturer;
     property bonusGroupDescrManufacturer : String read FbonusGroupDescrManufacturer write FbonusGroupDescrManufacturer;
-    property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories write Faccessories;
-    property sets : TOpenMasterdataAPI_SetList read Fsets write Fsets;
-    property attribute : TOpenMasterdataAPI_AttributeList read Fattribute write Fattribute;
+    //Ab OM 11
+    property accessorieGroupIdManufacturer : String read FaccessorieGroupIdManufacturer write FaccessorieGroupIdManufacturer;
+    property accessorieGroupDescrManufacturer : String read FaccessorieGroupDescrManufacturer write FaccessorieGroupDescrManufacturer;
+    property accessories : TOpenMasterdataAPI_AccessoryList read Faccessories;
+    property sets : TOpenMasterdataAPI_SetList read Fsets;
+    property attribute : TOpenMasterdataAPI_AttributeList read Fattribute;
     property constructionFrom : String read FconstructionFrom write FconstructionFrom;
     property constructionTo : String read FconstructionTo write FconstructionTo;
     property constructionText : String read FconstructionText write FconstructionText;
     property CUperOU : double read FCUperOU write FCUperOU;
     property contentUnit : String read FcontentUnit write FcontentUnit;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_LogisticsMeasure = class
@@ -294,6 +313,8 @@ type
   public
     property measure : String read Fmeasure write Fmeasure;
     property unit_ : String read Funit_ write Funit_;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_LogisticsWeight = class
@@ -303,9 +324,14 @@ type
   public
     property weight : String read Fweight write Fweight;
     property unit_ : String read Funit_ write Funit_;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_CarryingCategory = (
+      //Beim Wert 0 handelt es sich um eine gueltige Befoerderungskategorie.
+      //Fehlt die Angabe oder ist sie unlesbar, steht hier None.
+      omdCarryingCategory_None,
       omdCarryingCategory_0,
       omdCarryingCategory_1,
       omdCarryingCategory_2,
@@ -342,6 +368,7 @@ type
       omdPackageType_PLA,//PLA = Platte
       omdPackageType_CI, //CI = Kanister
       omdPackageType_GEB,//GEB = Gebinde
+      omdPackageType_PMS,//PMS = in der Spec 9.0.0 ohne Beschreibung gelistet
       omdPackageType_Unknown
     );
 
@@ -367,10 +394,10 @@ type
     property packagingType : TOpenMasterdataAPI_PackageType read FpackagingType write FpackagingType;
     property quantity : double read Fquantity write Fquantity;
     property gtin : String read Fgtin write Fgtin;
-    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
-    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
-    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
-    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA;
+    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB;
+    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC;
+    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight;
   end;
 
   TOpenMasterdataAPI_PackagingUnitList = class(TObjectList<TOpenMasterdataAPI_PackagingUnit>);
@@ -419,12 +446,14 @@ type
     property lucidNumber : String read FlucidNumber write FlucidNumber;
     property packagingDisposalProvider : String read FpackagingDisposalProvider write FpackagingDisposalProvider;
     property weeeNumber : String read FweeeNumber write FweeeNumber;
-    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA write FmeasureA;
-    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB write FmeasureB;
-    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC write FmeasureC;
-    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight write Fweight;
+    property measureA : TOpenMasterdataAPI_LogisticsMeasure read FmeasureA;
+    property measureB : TOpenMasterdataAPI_LogisticsMeasure read FmeasureB;
+    property measureC : TOpenMasterdataAPI_LogisticsMeasure read FmeasureC;
+    property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight;
     property packagingQuantity : Integer read FpackagingQuantity write FpackagingQuantity;
-    property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits write FpackagingUnits;
+    property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_TextRow = class
@@ -456,8 +485,8 @@ type
     /// Text
     /// </summary>
     property text : String read Ftext write Ftext;
-    property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct write FlinkedProduct;
-    property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct write FlinkedHistoricProduct;
+    property linkedProduct : TOpenMasterdataAPI_LinkedProduct read FlinkedProduct;
+    property linkedHistoricProduct : TOpenMasterdataAPI_LinkedHistoricProduct read FlinkedHistoricProduct;
   public
     constructor Create;
     destructor Destroy; override;
@@ -468,8 +497,8 @@ type
     FtextRow: TOpenMasterdataAPI_TextRow;
     FarticleRow: TOpenMasterdataAPI_ArticleRow;
   public
-    property textRow : TOpenMasterdataAPI_TextRow read FtextRow write FtextRow;
-    property articleRow : TOpenMasterdataAPI_ArticleRow read FarticleRow write FarticleRow;
+    property textRow : TOpenMasterdataAPI_TextRow read FtextRow;
+    property articleRow : TOpenMasterdataAPI_ArticleRow read FarticleRow;
   public
     constructor Create;
     destructor Destroy; override;
@@ -484,10 +513,12 @@ type
     FsparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList;
   public
     property listNumber : String read FlistNumber write FlistNumber;
-    property sparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList read FsparepartlistRow write FsparepartlistRow;
+    property sparepartlistRow : TOpenMasterdataAPI_SparepartlistRowList read FsparepartlistRow;
   public
     constructor Create;
     destructor Destroy; override;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Price = class
@@ -496,16 +527,38 @@ type
     FquantityUnit: String;
     Fvalue: String;
     Fcurrency: String;
+    FlowerBound: String;
   public
     property value : String read Fvalue write Fvalue;
     property currency : String read Fcurrency write Fcurrency;
     property basis : Integer read Fbasis write Fbasis;
     property quantityUnit : String read FquantityUnit write FquantityUnit;
+    //Ab OM 11: untere Staffelgrenze, ab der dieser Preis gilt.
+    //In Antworten nach 9.0.2 bleibt das Feld leer.
+    property lowerBound : String read FlowerBound write FlowerBound;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
+  end;
+
+  //Ab OM 11: Aktionspreis mit Gueltigkeitszeitraum
+  TOpenMasterdataAPI_PromotionalPrice = class(TOpenMasterdataAPI_Price)
+  private
+    FstartOfValidity: TDateTime;
+    FendOfValidity: TDateTime;
+  public
+    property startOfValidity : TDateTime read FstartOfValidity write FstartOfValidity;
+    property endOfValidity : TDateTime read FendOfValidity write FendOfValidity;
+  end;
+
+  TOpenMasterdataAPI_PromotionalPriceList = class(TObjectList<TOpenMasterdataAPI_PromotionalPrice>)
   end;
 
   TOpenMasterdataAPI_PriceHelper = class helper for TOpenMasterdataAPI_Price
   public
     function ValueAsCurrency : Currency;
+  end;
+
+  TOpenMasterdataAPI_PriceList = class(TObjectList<TOpenMasterdataAPI_Price>)
   end;
 
   TOpenMasterdataAPI_LinePrice = class(TOpenMasterdataAPI_Price)
@@ -532,6 +585,11 @@ type
     FcommodityGroupDescr: String;
     FmainCommodityGroupId: String;
     FmodelNumber: String;
+    FnoOrderBefore: TDateTime;
+    FnoDeliveryBefore: TDateTime;
+    FnoMarketingBefore: TDateTime;
+    FsparepartsystemURL: String;
+    Fsparepartsystemdescription: String;
     Fmatchcode: String;
     FmainCommodityGroupDescr: String;
   public
@@ -542,7 +600,7 @@ type
     property endOfValidity : TDate read FendOfValidity write FendOfValidity; //Gültigkeitsende
     property productShortDescr : String read FproductShortDescr write FproductShortDescr; //max 256 Artikelkurzbeschreibung (neuer Text aus dem Textgipfel)
     property priceOnDemand : Boolean read FpriceOnDemand write FpriceOnDemand; //Angabe, ob der Preis des Artikels nur auf Anfrage übermittelt wird
-    property rrp : TOpenMasterdataAPI_Price read Frrp write Frrp;
+    property rrp : TOpenMasterdataAPI_Price read Frrp;
     property mainCommodityGroupId : String read FmainCommodityGroupId write FmainCommodityGroupId; //max 3 Hauptwarengruppe Handel
     property mainCommodityGroupDescr : String read FmainCommodityGroupDescr write FmainCommodityGroupDescr; //max 40 Hauptwarengruppe Beschreibung Handel
     property commodityGroupId : String read FcommodityGroupId write FcommodityGroupId; //max 10 Warengruppe Handel
@@ -551,6 +609,14 @@ type
     property matchcode : String read Fmatchcode write Fmatchcode; //max 15 Matchcode
     property serie : String read Fserie write Fserie; //max 80 Serie
     property modelNumber : String read FmodelNumber write FmodelNumber; //max 15 Modell
+    //Ab OM 11
+    property noOrderBefore : TDateTime read FnoOrderBefore write FnoOrderBefore; //Keine Bestellung vor
+    property noDeliveryBefore : TDateTime read FnoDeliveryBefore write FnoDeliveryBefore; //Keine Lieferung vor
+    property noMarketingBefore : TDateTime read FnoMarketingBefore write FnoMarketingBefore; //Keine Vermarktung vor
+    property sparepartsystemURL : String read FsparepartsystemURL write FsparepartsystemURL; //URL Ersatzteilsystem
+    property sparepartsystemdescription : String read Fsparepartsystemdescription write Fsparepartsystemdescription;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   //Rohstoffangaben
@@ -569,6 +635,7 @@ type
     rawMaterial_W,  //Wolfram
     rawMaterial_ZN, //Zink
     rawMaterial_SN,  //Zinn
+    rawMaterial_MK, //in der Spec 9.0.0 ohne Beschreibung gelistet
     rawMaterial_Unknown
     );
 
@@ -609,17 +676,30 @@ type
     FtaxCode: Integer;
     FbillBasis : String;
     FrawMaterial: TOpenMasterdataAPI_Materials;
+    FlistPriceScale: TOpenMasterdataAPI_PriceList;
+    FnetPriceScale: TOpenMasterdataAPI_PriceList;
+    FrrpScale: TOpenMasterdataAPI_PriceList;
+    FpromotionalPrice: TOpenMasterdataAPI_PromotionalPriceList;
   public
     constructor Create;
     destructor Destroy; override;
 
-    property listPrice : TOpenMasterdataAPI_Price read FlistPrice write FlistPrice;
-    property rrp : TOpenMasterdataAPI_Price read Frrp write Frrp;
-    property netPrice : TOpenMasterdataAPI_Price read FnetPrice write FnetPrice;
+    property listPrice : TOpenMasterdataAPI_Price read FlistPrice;
+    property rrp : TOpenMasterdataAPI_Price read Frrp;
+    property netPrice : TOpenMasterdataAPI_Price read FnetPrice;
+    //Liefert ein Lieferant mehrere Preisstufen als Array, stehen hier alle
+    //Stufen. listPrice, netPrice und rrp enthalten weiterhin die erste Stufe.
+    property listPriceScale : TOpenMasterdataAPI_PriceList read FlistPriceScale;
+    property netPriceScale : TOpenMasterdataAPI_PriceList read FnetPriceScale;
+    property rrpScale : TOpenMasterdataAPI_PriceList read FrrpScale;
+    //Ab OM 11: Aktionspreise mit Gueltigkeitszeitraum
+    property promotionalPrice : TOpenMasterdataAPI_PromotionalPriceList read FpromotionalPrice;
     property taxCode : Integer read FtaxCode write FtaxCode; //Umsatzsteuer - 0 = voller Satz Ust.-Artikel - 1 = halber Satz Ust.-Artikel - 7 = Umkehr der Steuerschuld nach §13b UstG - 8 = Umsatzsteuerfrei nach §13b UstG „Bauleistungen
     property billBasis : String read FbillBasis write FbillBasis; //Abrechnungsbasis
-    property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial write FrawMaterial; //Liste von Materialzuschlägen
-    property linePrice : TOpenMasterdataAPI_LinePriceList read FlinePrice write FlinePrice;
+    property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial; //Liste von Materialzuschlägen
+    property linePrice : TOpenMasterdataAPI_LinePriceList read FlinePrice;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Descriptions = class
@@ -633,6 +713,8 @@ type
     property productDescr : String read FproductDescr write FproductDescr;
     property shorttext2 : String read Fshorttext2 write Fshorttext2;
     property marketingText : String read FmarketingText write FmarketingText;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Picture = class
@@ -677,6 +759,7 @@ type
     FmanufacturerId: String;
     FmanufacturerIdType: String;
     Fgtin: String;
+    Fstatus: Integer;
     Fsparepartlist: TOpenMasterdataAPI_Sparepartlist;
   public
     constructor Create;
@@ -687,19 +770,26 @@ type
     property manufacturerIdType : String read FmanufacturerIdType write FmanufacturerIdType; //Typ der Identifikation des Herstellers (z. B. DUNS, GLN, ...)
     property manufacturerPid : String read FmanufacturerPid write FmanufacturerPid; //Identifikation des Herstellers
     property gtin : String read Fgtin write Fgtin; //GTIN des Artikels
-    property basic : TOpenMasterdataAPI_Basic read Fbasic write Fbasic;
-    property additional : TOpenMasterdataAPI_Additional read Fadditional write Fadditional;
-    property logistics : TOpenMasterdataAPI_Logistics read Flogistics write Flogistics;
-    property prices : TOpenMasterdataAPI_Prices read Fprices write Fprices;
-    property descriptions : TOpenMasterdataAPI_Descriptions read Fdescriptions write Fdescriptions;
-    property pictures : TOpenMasterdataAPI_PictureList read Fpictures write Fpictures;
-    property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist write Fsparepartlist;
-    property documents : TOpenMasterdataAPI_DocumentList read Fdocuments write Fdocuments;
+    //Ab OM 11: Status des Artikels je Treffer, 200, 404, 950, 951, 952 oder 960.
+    //0 bedeutet, dass die Antwort kein Statusfeld enthaelt.
+    property status : Integer read Fstatus write Fstatus;
+    property basic : TOpenMasterdataAPI_Basic read Fbasic;
+    property additional : TOpenMasterdataAPI_Additional read Fadditional;
+    property logistics : TOpenMasterdataAPI_Logistics read Flogistics;
+    property prices : TOpenMasterdataAPI_Prices read Fprices;
+    property descriptions : TOpenMasterdataAPI_Descriptions read Fdescriptions;
+    property pictures : TOpenMasterdataAPI_PictureList read Fpictures;
+    property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist;
+    property documents : TOpenMasterdataAPI_DocumentList read Fdocuments;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
   public
     procedure LoadFromJson(const _JsonValue : String);
+    //Wie LoadFromJson, meldet aber zurueck ob die Antwort ueberhaupt als JSON-Objekt lesbar war
+    function TryLoadFromJson(const _JsonValue : String; out _Error : String) : Boolean;
   end;
 
   TOpenMasterdataHelper = class
@@ -755,6 +845,67 @@ begin
   end;
 end;
 
+class function TOpenMasterdataAPI_DataPackageHelper.TryDataPackageFromString(
+  const _Val: String; out _DataPackage: TOpenMasterdataAPI_DataPackage): Boolean;
+var
+  i : TOpenMasterdataAPI_DataPackage;
+  trimmedValue : String;
+begin
+  Result := false;
+  trimmedValue := Trim(_Val);
+  if trimmedValue = '' then
+    exit;
+  for i := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+    if SameText(trimmedValue,DataPackageAsString(i)) then
+    begin
+      _DataPackage := i;
+      exit(true);
+    end;
+end;
+
+class function TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+  const _Val: String; _Default: TOpenMasterdataAPI_DataPackages;
+  _UnknownNames: TStrings): TOpenMasterdataAPI_DataPackages;
+var
+  names : TArray<String>;
+  name : String;
+  package : TOpenMasterdataAPI_DataPackage;
+begin
+  Result := [];
+  if Assigned(_UnknownNames) then
+    _UnknownNames.Clear;
+  if Trim(_Val) = '' then
+    exit(_Default);
+
+  //Tabulator und Zeilenumbruch zaehlen mit: eine ueber mehrere Zeilen
+  //fortgesetzte Angabe soll nicht als ein einziger, unbekannter Name gelten.
+  names := _Val.Split([',',';','|',' ',#9,#13,#10],TStringSplitOptions.ExcludeEmpty);
+
+  //Eine Angabe, die nur aus Trennern besteht, wuerde sonst wortlos in der
+  //Vorgabe verschwinden
+  if Length(names) = 0 then
+  begin
+    if Assigned(_UnknownNames) then
+      _UnknownNames.Add(Trim(_Val));
+    exit(_Default);
+  end;
+
+  for name in names do
+  begin
+    if TryDataPackageFromString(name,package) then
+      Include(Result,package)
+    else
+    if Assigned(_UnknownNames) and (_UnknownNames.IndexOf(Trim(name)) < 0) then
+      _UnknownNames.Add(Trim(name));
+  end;
+
+  //Eine Angabe, die kein bekanntes Paket nennt, ist ein Konfigurationsfehler.
+  //Mit einer leeren Auswahl wuerde jede Abfrage abgelehnt, deshalb gilt dann
+  //die Vorgabe. Ueber _UnknownNames bleibt der Fehler sichtbar.
+  if Result = [] then
+    Result := _Default;
+end;
+
 class function TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
   _Val: TOpenMasterdataAPI_DataPackages): String;
 var
@@ -780,6 +931,10 @@ begin
   FlinePrice := TOpenMasterdataAPI_LinePriceList.Create;
   FnetPrice := TOpenMasterdataAPI_Price.Create;
   FrawMaterial := TOpenMasterdataAPI_Materials.Create;
+  FlistPriceScale := TOpenMasterdataAPI_PriceList.Create;
+  FnetPriceScale := TOpenMasterdataAPI_PriceList.Create;
+  FrrpScale := TOpenMasterdataAPI_PriceList.Create;
+  FpromotionalPrice := TOpenMasterdataAPI_PromotionalPriceList.Create;
 end;
 
 destructor TOpenMasterdataAPI_Prices.Destroy;
@@ -789,6 +944,10 @@ begin
   if Assigned(FlinePrice) then begin FlinePrice.Free; FlinePrice := nil; end;
   if Assigned(FnetPrice) then begin FnetPrice.Free; FnetPrice := nil; end;
   if Assigned(FrawMaterial) then begin FrawMaterial.Free; FrawMaterial := nil; end;
+  if Assigned(FlistPriceScale) then begin FlistPriceScale.Free; FlistPriceScale := nil; end;
+  if Assigned(FnetPriceScale) then begin FnetPriceScale.Free; FnetPriceScale := nil; end;
+  if Assigned(FrrpScale) then begin FrrpScale.Free; FrrpScale := nil; end;
+  if Assigned(FpromotionalPrice) then begin FpromotionalPrice.Free; FpromotionalPrice := nil; end;
   inherited;
 end;
 
@@ -865,15 +1024,23 @@ end;
 
 procedure TOpenMasterdataAPI_ResultHelper.LoadFromJson(const _JsonValue: String);
 var
+  errorMessage : String;
+begin
+  if not TryLoadFromJson(_JsonValue,errorMessage) then
+    raise Exception.Create(errorMessage);
+end;
+
+function TOpenMasterdataAPI_ResultHelper.TryLoadFromJson(const _JsonValue: String;
+  out _Error: String): Boolean;
+var
   messageJson:      TJSONValue;
 
   jsonString  : TJSONString;
-  jsonNumber : TJSONNumber;
-  jsonArray : TJSONArray;
+  jsonArray,jsonArray2 : TJSONArray;
   jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
   valueAsString : String;
-  boolValue : Boolean;
+  intValue : Integer;
 
   itemSparepartlistRow : TOpenMasterdataAPI_SparepartlistRow;
 
@@ -882,29 +1049,61 @@ var
     Result := TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,_Value);
   end;
 
-  function TryGetBoolean(_Json : TJSONValue; const _Name : String; out _Value : Boolean) : Boolean;
+  //Zahlfelder kommen je nach Lieferant als JSON-Zahl oder als String.
+  //Auch eine dezimal geschriebene Ganzzahl wie 1024.0 wird uebernommen.
+  function TryGetInt(_Json : TJSONValue; const _Name : String; out _Value : Integer) : Boolean;
+  var
+    scalarValue : String;
+    floatValue : Double;
   begin
-    Result := TOpenMasterdataAPIHelper.JSONTryGetBoolean(_Json,_Name,_Value);
+    _Value := 0;
+    Result := false;
+    if not TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,scalarValue) then
+      exit;
+    scalarValue := Trim(scalarValue);
+    if scalarValue = '' then
+      exit;
+    if TryStrToInt(scalarValue,_Value) then
+      exit(true);
+    //Dezimal geschriebene Ganzzahlen wie 1024.0 gelten ebenfalls. Ein echter
+    //Kommawert ist dagegen fachlich unzulaessig und wird nicht gerundet.
+    //Ein nicht lesbarer Wert darf einen vorhandenen nicht mit 0 ueberschreiben.
+    floatValue := TOpenMasterdataAPIHelper.JSONStrToFloat(scalarValue);
+    if (floatValue = 0) or (Frac(floatValue) <> 0) then
+      exit;
+    if (floatValue > MaxInt) or (floatValue < -MaxInt) then
+      exit;
+    _Value := Trunc(floatValue);
+    Result := true;
   end;
 
   procedure LoadPriceFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
+  var
+    scalarValue : String; //lokal, damit die Variablen des Aufrufers nicht ueberschrieben werden
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
 
-    if TryGetString(_Val,'value',valueAsString) then
-      _Result.value := valueAsString;
-    if TryGetString(_Val,'currency',valueAsString) then
-      _Result.currency := valueAsString;
-    if TryGetString(_Val,'basis',valueAsString) then
-      _Result.basis := StrToIntDef(valueAsString,1);
-    if TryGetString(_Val,'quantityUnit',valueAsString) then
-      _Result.quantityUnit := valueAsString;
+    if TryGetString(_Val,'value',scalarValue) then
+      _Result.value := scalarValue;
+    if TryGetString(_Val,'currency',scalarValue) then
+      _Result.currency := scalarValue;
+    if TryGetString(_Val,'basis',scalarValue) then
+      _Result.basis := StrToIntDef(scalarValue,1);
+    if TryGetString(_Val,'quantityUnit',scalarValue) then
+      _Result.quantityUnit := scalarValue;
+    //Ab OM 11 bei Staffelpreisen
+    if TryGetString(_Val,'lowerBound',scalarValue) then
+      _Result.lowerBound := scalarValue;
   end;
 
-  procedure LoadPriceOrFirstArrayItemFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
+  //Preise koennen als Einzelobjekt oder als Staffel (Array) kommen.
+  //_Result erhaelt die erste Stufe, _Scale alle Stufen.
+  procedure LoadPriceOrFirstArrayItemFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price;
+    _Scale : TOpenMasterdataAPI_PriceList = nil);
   var
     priceArray : TJSONArray;
+    priceItem : TJSONValue;
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
@@ -914,6 +1113,13 @@ var
       priceArray := TJSONArray(_Val);
       if priceArray.Count > 0 then
         LoadPriceFromJson(priceArray.Items[0],_Result);
+      if Assigned(_Scale) then
+        for priceItem in priceArray do
+        begin
+          var itemPrice : TOpenMasterdataAPI_Price := TOpenMasterdataAPI_Price.Create;
+          _Scale.Add(itemPrice);
+          LoadPriceFromJson(priceItem,itemPrice);
+        end;
       exit;
     end;
 
@@ -929,7 +1135,7 @@ var
       3 : Result := omdCarryingCategory_3;
       4 : Result := omdCarryingCategory_4;
     else
-      Result := omdCarryingCategory_0;
+      Result := omdCarryingCategory_None;
     end;
   end;
 
@@ -948,15 +1154,17 @@ var
 
   procedure LoadMeasureByNameFromJson(_Val : TJSONValue; const _PrimaryName, _SecondaryName : String;
     _Result : TOpenMasterdataAPI_LogisticsMeasure);
+  var
+    measureValue : TJSONValue; //lokal, damit die Laufvariable des Aufrufers nicht ueberschrieben wird
   begin
     if (_Val = nil) or (_Result = nil) then
       exit;
 
-    if (_PrimaryName <> '') and _Val.TryGetValue<TJSONValue>(_PrimaryName,jsonValue2) then
-      LoadMeasureUnitFromJson(jsonValue2,_Result)
+    if (_PrimaryName <> '') and _Val.TryGetValue<TJSONValue>(_PrimaryName,measureValue) then
+      LoadMeasureUnitFromJson(measureValue,_Result)
     else
-    if (_SecondaryName <> '') and _Val.TryGetValue<TJSONValue>(_SecondaryName,jsonValue2) then
-      LoadMeasureUnitFromJson(jsonValue2,_Result);
+    if (_SecondaryName <> '') and _Val.TryGetValue<TJSONValue>(_SecondaryName,measureValue) then
+      LoadMeasureUnitFromJson(measureValue,_Result);
   end;
 
   procedure LoadWeightFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_LogisticsWeight);
@@ -1071,14 +1279,43 @@ var
   end;
 
 begin
-  messageJson := TJSONObject.ParseJSONValue(
-       TOpenMasterdataHelper.FixJson(_JsonValue),
-       false,true) as TJSONValue;
+  Result := false;
+  _Error := '';
 
-  if messageJson = nil then
-    exit;
+  //Vor dem Parseversuch leeren. Sonst behielte das Objekt bei einer
+  //unlesbaren Antwort die Daten des zuvor geladenen Artikels.
+  Clear;
 
   try
+    messageJson := TJSONObject.ParseJSONValue(
+         TOpenMasterdataHelper.FixJson(_JsonValue),
+         false,true) as TJSONValue;
+  except
+    on E:Exception do
+    begin
+      _Error := E.ClassName+' '+E.Message;
+      exit;
+    end;
+  end;
+
+  //Nur ein JSON-Objekt ist eine verwertbare Produktantwort. null, [] oder ein Skalar nicht.
+  if not (messageJson is TJSONObject) then
+  begin
+    if messageJson = nil then
+      _Error := 'Die Antwort enthaelt kein JSON.'
+    else
+    begin
+      _Error := 'Die Antwort ist kein JSON-Objekt.';
+      messageJson.Free;
+    end;
+    exit;
+  end;
+
+  try
+
+    //Ab OM 11: Status je Artikel
+    if TryGetInt(messageJson,'status',intValue) then
+      status := intValue;
     if TryGetString(messageJson,'supplierPid',valueAsString) then
       supplierPid := valueAsString;
     if TryGetString(messageJson,'manufacturerId',valueAsString) then
@@ -1093,11 +1330,24 @@ begin
     if messageJson.TryGetValue<TJSONValue>('prices',jsonValue) then
     begin
       if jsonValue.TryGetValue<TJSONValue>('listPrice',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.listPrice);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.listPrice,prices.listPriceScale);
       if jsonValue.TryGetValue<TJSONValue>('rrp',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.rrp);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.rrp,prices.rrpScale);
       if jsonValue.TryGetValue<TJSONValue>('netPrice',jsonValue2) then
-        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.netPrice);
+        LoadPriceOrFirstArrayItemFromJson(jsonValue2,prices.netPrice,prices.netPriceScale);
+      //Ab OM 11: Aktionspreise mit Gueltigkeitszeitraum
+      if jsonValue.TryGetValue<TJSONArray>('promotionalPrice',jsonArray) then
+      for jsonValue2 in jsonArray do
+      begin
+        var itemPromotionalPrice : TOpenMasterdataAPI_PromotionalPrice := TOpenMasterdataAPI_PromotionalPrice.Create;
+        prices.promotionalPrice.Add(itemPromotionalPrice);
+
+        LoadPriceFromJson(jsonValue2,itemPromotionalPrice);
+        if TryGetString(jsonValue2,'startOfValidity',valueAsString) then
+          itemPromotionalPrice.startOfValidity := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+        if TryGetString(jsonValue2,'endOfValidity',valueAsString) then
+          itemPromotionalPrice.endOfValidity := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      end;
 
       if TryGetString(jsonValue,'taxCode',valueAsString) then
         prices.taxCode := StrToIntDef(valueAsString,0);
@@ -1132,7 +1382,11 @@ begin
         prices.linePrice.Add(itemLinePrice);
 
         LoadPriceFromJson(jsonValue2,itemLinePrice);
+        //Die Spec 9.0.0 schreibt das Feld als 'descriptiion', deshalb beide Schreibweisen
         if TryGetString(jsonValue2,'description',valueAsString) then
+          itemLinePrice.description := valueAsString
+        else
+        if TryGetString(jsonValue2,'descriptiion',valueAsString) then
           itemLinePrice.description := valueAsString;
       end;
     end;
@@ -1168,6 +1422,17 @@ begin
         basic.serie := JsonArrayToDelimitedString(jsonArray);
       if TryGetString(jsonValue,'modelNumber',valueAsString) then
         basic.modelNumber := valueAsString;
+      //Ab OM 11
+      if TryGetString(jsonValue,'noOrderBefore',valueAsString) then
+        basic.noOrderBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'noDeliveryBefore',valueAsString) then
+        basic.noDeliveryBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'noMarketingBefore',valueAsString) then
+        basic.noMarketingBefore := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
+      if TryGetString(jsonValue,'sparepartsystemURL',valueAsString) then
+        basic.sparepartsystemURL := valueAsString;
+      if TryGetString(jsonValue,'sparepartsystemdescription',valueAsString) then
+        basic.sparepartsystemdescription := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONValue>('additional',jsonValue) then
     begin
@@ -1203,25 +1468,18 @@ begin
       end;
       if TryGetString(jsonValue,'deepLink',valueAsString) then
         additional.deepLink := valueAsString;
-      additional.expiringProduct := false;
-      additional.expiringProductHasSuccessor := false;
-      additional.expiringProductState := '';
       if TryGetString(jsonValue,'expiringProduct',valueAsString) then
       begin
-        additional.expiringProductState := valueAsString;
-        additional.expiringProduct := SameText(valueAsString,'yes')
-          or SameText(valueAsString,'true')
-          or StartsText('yes',valueAsString);
-        additional.expiringProductHasSuccessor := ContainsText(valueAsString,'successor');
-      end
-      else
-      if TryGetBoolean(jsonValue,'expiringProduct',boolValue) then
-      begin
-        additional.expiringProduct := boolValue;
-        if boolValue then
-          additional.expiringProductState := 'Yes'
+        //Kommt je nach Lieferant als String (No/Yes/Yes-Successor) oder als JSON-Boolean.
+        //TryGetString liefert auch fuer TJSONBool einen Wert, daher hier normalisieren.
+        if SameText(valueAsString,'true') then
+          valueAsString := 'Yes'
         else
-          additional.expiringProductState := 'No';
+        if SameText(valueAsString,'false') then
+          valueAsString := 'No';
+        additional.expiringProductState := valueAsString;
+        additional.expiringProduct := StartsText('yes',valueAsString);
+        additional.expiringProductHasSuccessor := ContainsText(valueAsString,'successor');
       end;
       if TryGetString(jsonValue,'expiringDate',valueAsString) then
         additional.expiringDate := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
@@ -1244,6 +1502,11 @@ begin
         additional.discountGroupDescrManufacturer := jsonString.Value;
       if jsonValue.TryGetValue<TJSONString>('bonusGroupIdManufacturer',jsonString) then
         additional.bonusGroupIdManufacturer := jsonString.Value;
+      //Ab OM 11
+      if TryGetString(jsonValue,'accessorieGroupIdManufacturer',valueAsString) then
+        additional.accessorieGroupIdManufacturer := valueAsString;
+      if TryGetString(jsonValue,'accessorieGroupDescrManufacturer',valueAsString) then
+        additional.accessorieGroupDescrManufacturer := valueAsString;
       if jsonValue.TryGetValue<TJSONString>('bonusGroupDescrManufacturer',jsonString) then
         additional.bonusGroupDescrManufacturer := jsonString.Value;
       if jsonValue.TryGetValue<TJSONArray>('accessories',jsonArray) then
@@ -1270,7 +1533,10 @@ begin
         if TryGetString(jsonValue2,'amount',valueAsString) then
           itemSet.amount := TOpenMasterdataAPIHelper.JSONStrToFloat(valueAsString);
       end;
-      if jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
+      //Einzelne Lieferanten (z.B. GC-Gruppe) liefern den Schluessel im Plural
+      if not jsonValue.TryGetValue<TJSONArray>('attribute',jsonArray) then
+        jsonValue.TryGetValue<TJSONArray>('attributes',jsonArray);
+      if Assigned(jsonArray) then
       for jsonValue2 in jsonArray do
       begin
         var itemAttribute : TOpenMasterdataAPI_Attribute := TOpenMasterdataAPI_Attribute.Create;
@@ -1353,20 +1619,24 @@ begin
       LoadMeasureByNameFromJson(jsonValue,'measureC','height',logistics.measureC);
       if (logistics.measureC.measure = '') and (logistics.measureC.unit_ = '') then
         LoadMeasureByNameFromJson(jsonValue,'','heigth',logistics.measureC);
+      //Die Spec 9.0.0 schreibt das Feld in Logistics als 'weigth', reale Responses nutzen 'weight'
       if jsonValue.TryGetValue<TJSONValue>('weight',jsonValue2) then
+        LoadWeightFromJson(jsonValue2,logistics.weight)
+      else
+      if jsonValue.TryGetValue<TJSONValue>('weigth',jsonValue2) then
         LoadWeightFromJson(jsonValue2,logistics.weight);
-      if jsonValue.TryGetValue<TJSONValue>('unNumber',jsonValue2) then
-        logistics.unNumber := jsonValue2.Value;
-      if jsonValue.TryGetValue<TJSONValue>('dangerClass',jsonValue2) then
-        logistics.dangerClass := jsonValue2.Value;
+      if TryGetString(jsonValue,'unNumber',valueAsString) then
+        logistics.unNumber := valueAsString;
+      if TryGetString(jsonValue,'dangerClass',valueAsString) then
+        logistics.dangerClass := valueAsString;
       if TryGetString(jsonValue,'carryingCategory',valueAsString) then
         logistics.carryingCategory := CarryingCategoryFromString(valueAsString);
       if jsonValue.TryGetValue<TJSONBool>('ubaListRelevant',jsonBool) then
         logistics.ubaListRelevant := jsonBool.AsBoolean;
       if jsonValue.TryGetValue<TJSONBool>('ubaListConform',jsonBool) then
         logistics.ubaListConform := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONValue>('weeeNumber',jsonValue2) then
-        logistics.weeeNumber := jsonValue2.Value;
+      if TryGetString(jsonValue,'weeeNumber',valueAsString) then
+        logistics.weeeNumber := valueAsString;
       if TryGetString(jsonValue,'packagingQuantity',valueAsString) then
         logistics.packagingQuantity := StrToIntDef(valueAsString,0);
       if jsonValue.TryGetValue<TJSONArray>('packagingUnits',jsonArray) then
@@ -1429,26 +1699,26 @@ begin
       var itemPicture : TOpenMasterdataAPI_Picture := TOpenMasterdataAPI_Picture.Create;
       pictures.Add(itemPicture);
 
-      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-        itemPicture.url := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('urlThumbnail',jsonString) then
-        itemPicture.urlThumbnail := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-        itemPicture.type_ := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('use',jsonString) then
-        itemPicture.use := jsonString.Value;
+      if TryGetString(jsonValue,'url',valueAsString) then
+        itemPicture.url := valueAsString;
+      if TryGetString(jsonValue,'urlThumbnail',valueAsString) then
+        itemPicture.urlThumbnail := valueAsString;
+      if TryGetString(jsonValue,'type',valueAsString) then
+        itemPicture.type_ := valueAsString;
+      if TryGetString(jsonValue,'use',valueAsString) then
+        itemPicture.use := valueAsString;
       if jsonValue.TryGetValue<TJSONBool>('substituteId',jsonBool) then
         itemPicture.substituteId := jsonBool.AsBoolean;
-      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-        itemPicture.description := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-        itemPicture.sortOrder := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONNumber>('size',jsonNumber) then
-        itemPicture.size := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-        itemPicture.filename := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-        itemPicture.hash := jsonString.Value;
+      if TryGetString(jsonValue,'description',valueAsString) then
+        itemPicture.description := valueAsString;
+      if TryGetInt(jsonValue,'sortOrder',intValue) then
+        itemPicture.sortOrder := intValue;
+      if TryGetInt(jsonValue,'size',intValue) then
+        itemPicture.size := intValue;
+      if TryGetString(jsonValue,'filename',valueAsString) then
+        itemPicture.filename := valueAsString;
+      if TryGetString(jsonValue,'hash',valueAsString) then
+        itemPicture.hash := valueAsString;
     end;
     if messageJson.TryGetValue<TJSONArray>('documents',jsonArray) then
     for jsonValue in jsonArray do
@@ -1456,23 +1726,30 @@ begin
       var itemDocument : TOpenMasterdataAPI_Document := TOpenMasterdataAPI_Document.Create;
       documents.Add(itemDocument);
 
-      if jsonValue.TryGetValue<TJSONString>('url',jsonString) then
-        itemDocument.url := jsonString.Value;
+      if TryGetString(jsonValue,'url',valueAsString) then
+        itemDocument.url := valueAsString;
       if TryGetString(jsonValue,'urlThumbnail',valueAsString) then
         itemDocument.urlThumbnail := valueAsString;
-      if jsonValue.TryGetValue<TJSONString>('type',jsonString) then
-        itemDocument.type_ := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('description',jsonString) then
-        itemDocument.description := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONNumber>('sortOrder',jsonNumber) then
-        itemDocument.sortOrder := jsonNumber.AsInt;
-      if jsonValue.TryGetValue<TJSONValue>('size',jsonValue3) then
-        itemDocument.size := StrToIntDef(jsonValue3.Value,0);
-      if jsonValue.TryGetValue<TJSONString>('filename',jsonString) then
-        itemDocument.filename := jsonString.Value;
-      if jsonValue.TryGetValue<TJSONString>('hash',jsonString) then
-        itemDocument.hash := jsonString.Value;
+      if TryGetString(jsonValue,'type',valueAsString) then
+        itemDocument.type_ := valueAsString;
+      if TryGetString(jsonValue,'description',valueAsString) then
+        itemDocument.description := valueAsString;
+      if TryGetInt(jsonValue,'sortOrder',intValue) then
+        itemDocument.sortOrder := intValue;
+      if TryGetInt(jsonValue,'size',intValue) then
+        itemDocument.size := intValue;
+      if TryGetString(jsonValue,'filename',valueAsString) then
+        itemDocument.filename := valueAsString;
+      if TryGetString(jsonValue,'hash',valueAsString) then
+        itemDocument.hash := valueAsString;
+      //Spec 9.0.0: language ist ein Array von Sprachcodes, einzelne Lieferanten liefern einen String
+      if jsonValue.TryGetValue<TJSONArray>('language',jsonArray2) then
+        itemDocument.language := JsonArrayToDelimitedString(jsonArray2)
+      else
+      if TryGetString(jsonValue,'language',valueAsString) then
+        itemDocument.language := valueAsString;
     end;
+    Result := true;
   finally
     messageJson.Free;
   end;
@@ -1497,6 +1774,7 @@ function TOpenMasterdataAPI_PriceHelper.ValueAsCurrency: Currency;
 var
   fs : TFormatSettings;
 begin
+  fs := TFormatSettings.Invariant; //vollstaendig initialisieren, nicht nur einzelne Felder setzen
   fs.ThousandSeparator := ',';
   fs.DecimalSeparator := '.';
   Result := StrToCurrDef(value,0,fs);
@@ -1519,6 +1797,7 @@ begin
     exit;
   if (Length(_Val) = 8) and (Pos('-',_Val) = 0) then
   begin
+    //YYYYMMDD
     yearPart := StrToIntDef(Copy(_Val,1,4),0);
     monthPart := StrToIntDef(Copy(_Val,5,2),0);
     dayPart := StrToIntDef(Copy(_Val,7,2),0);
@@ -1527,7 +1806,16 @@ begin
       Result := DateOf(parsedDate);
       exit;
     end;
-    exit;
+    //DDMMYYYY, kommt z.B. von Sanitaer-Heinze
+    yearPart := StrToIntDef(Copy(_Val,5,4),0);
+    monthPart := StrToIntDef(Copy(_Val,3,2),0);
+    dayPart := StrToIntDef(Copy(_Val,1,2),0);
+    if TryEncodeDate(yearPart,monthPart,dayPart,parsedDate) then
+    begin
+      Result := DateOf(parsedDate);
+      exit;
+    end;
+    //kein bekanntes 8-stelliges Format, weiter mit den allgemeinen Fallbacks
   end;
   if TryISO8601ToDate(_Val,isoDate,false) then
   begin
@@ -1543,6 +1831,7 @@ class function TOpenMasterdataAPIHelper.JSONStrToFloat(_Val: String): double;
 var
   fs : TFormatSettings;
 begin
+  fs := TFormatSettings.Invariant; //vollstaendig initialisieren, nicht nur einzelne Felder setzen
   fs.ThousandSeparator := ',';
   fs.DecimalSeparator := '.';
   Result := StrToFloatDef(_Val,0,fs);
@@ -1583,6 +1872,9 @@ begin
   _Value := '';
   if (_Json = nil) or (not _Json.TryGetValue<TJSONValue>(_Name,jsonValue)) then
     exit;
+  //JSON null liefert ueber TJSONNull.Value den Literalstring 'null' - als "nicht vorhanden" behandeln
+  if jsonValue is TJSONNull then
+    exit;
   _Value := jsonValue.Value;
   Result := true;
 end;
@@ -1611,10 +1903,14 @@ end;
 class function TOpenMasterdataHelper.FixJson(const _JsonValue: String): String;
 begin
   //JSON-Korrektur
-  //Ungültiges JSON Wiedemann
+  //Einzelne Lieferanten (z.B. Wiedemann) liefern die GTIN als Zahl mit fuehrender Null.
+  //Das ist kein gueltiges JSON. Der Wert wird deshalb in einen String umgewandelt,
+  //damit die fuehrende Null erhalten bleibt.
+  //Eine alleinstehende 0 bleibt unangetastet, sie ist gueltiges JSON.
   Result := _JsonValue;
-  if Pos('"gtin": 0',Result)>0 then
-    Result := ReplaceText(Result,'"gtin": 0','"gtin": ');
+  if not ContainsText(Result,'"gtin"') then
+    exit;
+  Result := TRegEx.Replace(Result,'("gtin"\s*:\s*)(0\d+)','$1"$2"');
 end;
 
 { TOpenMasterdataAPI_PackageTypeHelper }
@@ -1703,6 +1999,9 @@ begin
   if SameText(_Val,'GEB') then
     Result := omdPackageType_GEB//GEB = Gebinde
   else
+  if SameText(_Val,'PMS') then
+    Result := omdPackageType_PMS
+  else
     Result := omdPackageType_Unknown;
 end;
 
@@ -1737,6 +2036,7 @@ begin
     omdPackageType_PLA: Result := 'PLA';
     omdPackageType_CI: Result := 'CI';
     omdPackageType_GEB: Result := 'GEB';
+    omdPackageType_PMS: Result := 'PMS';
     else Result := '';
   end;
 end;
@@ -1788,6 +2088,9 @@ begin
   if SameText(_Val,'SN') then
     Result := rawMaterial_SN
   else
+  if SameText(_Val,'MK') then
+    Result := rawMaterial_MK
+  else
     Result := rawMaterial_Unknown;
 end;
 
@@ -1809,6 +2112,7 @@ begin
     rawMaterial_W : Result := 'W';
     rawMaterial_ZN: Result := 'ZN';
     rawMaterial_SN: Result := 'SN';
+    rawMaterial_MK: Result := 'MK';
     else Result := '';
   end;
 end;
@@ -1854,6 +2158,156 @@ begin
   if Assigned(FtextRow) then begin FtextRow.Free; FtextRow := nil; end;
   if Assigned(FarticleRow) then begin FarticleRow.Free; FarticleRow := nil; end;
   inherited;
+end;
+
+procedure TOpenMasterdataAPI_LogisticsMeasure.Clear;
+begin
+  Funit_ := '';
+  Fmeasure := '';
+end;
+
+procedure TOpenMasterdataAPI_LogisticsWeight.Clear;
+begin
+  Funit_ := '';
+  Fweight := '';
+end;
+
+procedure TOpenMasterdataAPI_Price.Clear;
+begin
+  Fbasis := 0;
+  FquantityUnit := '';
+  Fvalue := '';
+  Fcurrency := '';
+  FlowerBound := '';
+end;
+
+procedure TOpenMasterdataAPI_Descriptions.Clear;
+begin
+  FproductDescr := '';
+  Fshorttext2 := '';
+  Fshorttext1 := '';
+  FmarketingText := '';
+end;
+
+procedure TOpenMasterdataAPI_Sparepartlist.Clear;
+begin
+  FlistNumber := '';
+  FsparepartlistRow.Clear;
+end;
+
+procedure TOpenMasterdataAPI_Prices.Clear;
+begin
+  FlistPrice.Clear;
+  frrp.Clear;
+  FlinePrice.Clear;
+  FnetPrice.Clear;
+  FtaxCode := 0;
+  FbillBasis := '';
+  FrawMaterial.Clear;
+  FlistPriceScale.Clear;
+  FnetPriceScale.Clear;
+  FrrpScale.Clear;
+  FpromotionalPrice.Clear;
+end;
+
+procedure TOpenMasterdataAPI_Basic.Clear;
+begin
+  FendOfValidity := 0;
+  FproductShortDescr := '';
+  FpriceOnDemand := false;
+  FstartOfValidity := 0;
+  Fserie := '';
+  FproductType := '';
+  FnoteOfUse := '';
+  FcommodityGroupId := '';
+  Frrp.Clear;
+  FcommodityGroupDescr := '';
+  FmainCommodityGroupId := '';
+  FmodelNumber := '';
+  FnoOrderBefore := 0;
+  FnoDeliveryBefore := 0;
+  FnoMarketingBefore := 0;
+  FsparepartsystemURL := '';
+  Fsparepartsystemdescription := '';
+  Fmatchcode := '';
+  FmainCommodityGroupDescr := '';
+end;
+
+procedure TOpenMasterdataAPI_Additional.Clear;
+begin
+  FcontentUnit := '';
+  FCUperOU := 0;
+  FexpiringProduct := false;
+  FexpiringProductHasSuccessor := false;
+  FexpiringProductState := '';
+  FminOrderQuantity := 0;
+  FdeepLink := '';
+  FminOrderUnit := '';
+  Fsets.Clear;
+  Faccessories.Clear;
+  FexpiringDate := 0;
+  FarticleNumberCatalogue := '';
+  FalternativeProduct.Clear;
+  FfollowupProduct.Clear;
+  FconstructionText := '';
+  FdiscountGroupDescrManufacturer := '';
+  FconstructionTo := '';
+  FcommodityGroupIdManufacturer := '';
+  Fattribute.Clear;
+  FcommodityGroupDescrManufacturer := '';
+  FconstructionFrom := '';
+  FdiscountGroupIdManufacturer := '';
+  FbonusGroupIdManufacturer := '';
+  FproductGroupIdManufacturer := '';
+  FenergyEfficiencyClass := '';
+  FbonusGroupDescrManufacturer := '';
+  FaccessorieGroupIdManufacturer := '';
+  FaccessorieGroupDescrManufacturer := '';
+  FproductGroupDescrManufacturer := '';
+end;
+
+procedure TOpenMasterdataAPI_Logistics.Clear;
+begin
+  FmeasureB.Clear;
+  FmeasureC.Clear;
+  FmeasureA.Clear;
+  FhazardousMaterial := false;
+  Fexportable := false;
+  Fweight.Clear;
+  FcommodityNumber := 0;
+  FcountryOfOrigin := '';
+  FpackagingDisposalProvider := '';
+  FstandardDeliveryPeriod := 0;
+  FpackagingQuantity := 0;
+  FubaListConform := false;
+  FubaListRelevant := false;
+  FpackagingUnits.Clear;
+  FreachInfo := '';
+  FlucidNumber := '';
+  FdangerClass := '';
+  FunNumber := '';
+  FweeeNumber := '';
+  FcarryingCategory := omdCarryingCategory_None;
+  FreachDate := 0;
+  FdurabilityPeriod := 0;
+end;
+
+procedure TOpenMasterdataAPI_Result.Clear;
+begin
+  Fprices.Clear;
+  Fdocuments.Clear;
+  Fdescriptions.Clear;
+  Flogistics.Clear;
+  Fbasic.Clear;
+  Fpictures.Clear;
+  Fadditional.Clear;
+  FsupplierPid := '';
+  FmanufacturerPid := '';
+  FmanufacturerId := '';
+  FmanufacturerIdType := '';
+  Fgtin := '';
+  Fstatus := 0;
+  Fsparepartlist.Clear;
 end;
 
 end.
