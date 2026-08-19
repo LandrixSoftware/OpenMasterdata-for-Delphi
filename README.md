@@ -38,6 +38,27 @@ Aktuell berücksichtigt der Loader insbesondere folgende Fälle:
  - Unterstützung zusätzlicher Dokumenttypen wie `PL`.
  - Unterstützung von Rohstofflisten unter `prices.rawMaterial`, inklusive `weightBasis`, `basisUnit`, `proportionByWeight`, `proportionUnit`, `quotationOfRawMaterial` und `currentQuotationOfRawMaterial`.
  - Sichtbare HTML-Ausgabe für Alternativartikel, Nachfolgeartikel, Zubehörartikel und Rohstoffangaben.
+ - JSON-`null` wird als leerer Wert behandelt und nicht als Text `null` übernommen.
+ - GTIN-Werte mit führender Null werden verlustfrei gelesen, obwohl sie formal kein gültiges JSON sind.
+ - Achtstellige Datumsangaben werden sowohl als `YYYYMMDD` als auch als `DDMMYYYY` erkannt.
+ - Preisstaffeln bleiben vollständig erhalten: `listPrice`, `netPrice` und `rrp` führen weiterhin die erste Stufe, alle Stufen stehen zusätzlich in `listPriceScale`, `netPriceScale` und `rrpScale`.
+ - Fallback von `weight` auf die Spec-Schreibweise `weigth` in `logistics`, analog zum bereits vorhandenen `heigth`.
+ - Unterstützung von `additional.attributes` im Plural, wie ihn einzelne Lieferanten senden.
+ - `Document.language` und `LinePrice.descriptiion` aus der Spec 9.0.0.
+ - Der optionale Query-Parameter `customerId` lässt sich über `SetCustomerId` setzen.
+ - Die Sonderstatus `950` und `951` liefern laut Spezifikation ein vollständiges Produkt, nämlich den Alternativ- bzw. Nachfolgeartikel. Deren Antwort wird geparst; der Statuscode bleibt über `GetLastErrorCode` abfragbar.
+
+## Tests
+
+Unter `Tests` liegt ein Konsolenprogramm mit Regressionstests für den Parser und die HTML-Ausgabe.
+
+```
+Tests\run-tests.bat
+```
+
+Das Skript sucht eine installierte Delphi-Version, kompiliert die Tests und führt sie aus. Der Rückgabewert ist 0, wenn alle Tests bestanden wurden. Liegt der Ordner `Testresponses` vor, wird zusätzlich jede dort abgelegte Lieferanten-Antwort als Smoketest geparst.
+
+Neue Beispiel-Responses lassen sich damit direkt gegen die vorhandene Parserlogik prüfen.
 
 ## Hinweise zu Rohstoffangaben
 
