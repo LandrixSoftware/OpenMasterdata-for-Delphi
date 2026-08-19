@@ -308,6 +308,9 @@ type
   end;
 
   TOpenMasterdataAPI_CarryingCategory = (
+      //Beim Wert 0 handelt es sich um eine gueltige Befoerderungskategorie.
+      //Fehlt die Angabe oder ist sie unlesbar, steht hier None.
+      omdCarryingCategory_None,
       omdCarryingCategory_0,
       omdCarryingCategory_1,
       omdCarryingCategory_2,
@@ -980,7 +983,7 @@ var
       3 : Result := omdCarryingCategory_3;
       4 : Result := omdCarryingCategory_4;
     else
-      Result := omdCarryingCategory_0;
+      Result := omdCarryingCategory_None;
     end;
   end;
 

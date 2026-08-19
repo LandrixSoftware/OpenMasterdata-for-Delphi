@@ -72,6 +72,9 @@ type
     function GetData(_Url : String; out _Result : TStream) : Boolean;
 
     function GetConnectionName : String;
+    //Achtung: die folgenden beiden Funktionen dienen der Fehlersuche. Die
+    //OAuth-Antwort enthaelt das Zugriffs- und das Refresh-Token im Klartext.
+    //Ihr Ergebnis gehoert nicht unveraendert in ein Protokoll.
     function GetCurrentAuthorizationToken : String;
     function GetLastOAuthResponseContent : String;
     function GetLastBySupplierPIDResponseContent : String;
@@ -157,6 +160,9 @@ type
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
     class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode) : IOpenMasterdataApiClient;
+    //Entfernt eine Verbindung aus der Verwaltung. Danach gibt der naechste
+    //Aufruf von NewOpenMasterdataConnection eine frische Instanz zurueck.
+    class function RemoveOpenMasterdataConnection(_ConnectionName : String) : Boolean;
     class function GetGrantTypeFromString(const _Val : String; _Default : TGrantType = TGrantType.omdgt_Password) : TGrantType;
     class function GetDataPackagesSendModeFromString(const _Val : String; _Default : TDataPackagesSendMode = TDataPackagesSendMode.omddpsm_PipeDelimited) : TDataPackagesSendMode;
   end;
@@ -365,6 +371,27 @@ begin
     Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
                  _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
     openConnections.Add(Result);
+  finally
+    openConnectionsCS.Release;
+  end;
+end;
+
+class function TOpenMasterdataApiClient.RemoveOpenMasterdataConnection(
+  _ConnectionName: String): Boolean;
+var
+  i : Integer;
+begin
+  Result := false;
+  EnsureOpenConnectionsInitialized;
+  openConnectionsCS.Acquire;
+  try
+    for i := openConnections.Count-1 downto 0 do
+    if SameText(_ConnectionName,
+              IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+    begin
+      openConnections.Delete(i);
+      Result := true;
+    end;
   finally
     openConnectionsCS.Release;
   end;
@@ -1007,37 +1034,59 @@ begin
   _RestClient.HandleRedirects := true;
 end;
 
+//Die Setter laufen wie die Requests unter FCS, damit die Konfiguration nicht
+//mitten in einer laufenden Abfrage aus einem anderen Thread wechselt.
 procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
   const _URL : String);
 var
   baseUrl : String;
 begin
-  if TrySplitEndpointUrl(_URL,FBySupplierPIDUrl,baseUrl) then
-    SetupProductRestClient(FRESTClientBySupplierPID,baseUrl);
+  FCS.Acquire;
+  try
+    if TrySplitEndpointUrl(_URL,FBySupplierPIDUrl,baseUrl) then
+      SetupProductRestClient(FRESTClientBySupplierPID,baseUrl);
+  finally
+    FCS.Release;
+  end;
 end;
 
 procedure TOpenMasterdataApiClient.SetByManufacturerDataURL(const _URL: String);
 var
   baseUrl : String;
 begin
-  if TrySplitEndpointUrl(_URL,FByManufacturerDataUrl,baseUrl) then
-    SetupProductRestClient(FRESTClientByManufacturerData,baseUrl);
+  FCS.Acquire;
+  try
+    if TrySplitEndpointUrl(_URL,FByManufacturerDataUrl,baseUrl) then
+      SetupProductRestClient(FRESTClientByManufacturerData,baseUrl);
+  finally
+    FCS.Release;
+  end;
 end;
 
 procedure TOpenMasterdataApiClient.SetByGTINURL(const _URL: String);
 var
   baseUrl : String;
 begin
-  if TrySplitEndpointUrl(_URL,FByGTINUrl,baseUrl) then
-    SetupProductRestClient(FRESTClientByGTIN,baseUrl);
+  FCS.Acquire;
+  try
+    if TrySplitEndpointUrl(_URL,FByGTINUrl,baseUrl) then
+      SetupProductRestClient(FRESTClientByGTIN,baseUrl);
+  finally
+    FCS.Release;
+  end;
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
 var
   baseUrl : String;
 begin
-  if TrySplitEndpointUrl(_URL,FOAuthUrl,baseUrl) then
-    FRESTClientOAuth.BaseURL := baseUrl;
+  FCS.Acquire;
+  try
+    if TrySplitEndpointUrl(_URL,FOAuthUrl,baseUrl) then
+      FRESTClientOAuth.BaseURL := baseUrl;
+  finally
+    FCS.Release;
+  end;
 end;
 
 procedure TOpenMasterdataApiClient.SetCustomerId(const _CustomerId: String);
