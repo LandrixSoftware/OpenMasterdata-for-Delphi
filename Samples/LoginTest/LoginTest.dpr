@@ -125,6 +125,18 @@ begin
   Result.SetRetryPolicy(3,120);
 end;
 
+//Welche Datenpakete abgefragt werden sollen. Ohne den Schluessel sind es
+//alle. Ein Lieferant, der ein bestimmtes Paket nicht ausliefern kann, laesst
+//sich damit trotzdem pruefen.
+function ConfiguredDataPackages(_Ini : TMemIniFile; const _Section : String;
+  _UnknownNames : TStrings = nil) : TOpenMasterdataAPI_DataPackages;
+begin
+  Result := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+              _Ini.ReadString(_Section,'DataPackages',''),
+              TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,
+              _UnknownNames);
+end;
+
 //In ArtNoAsCommatext stehen mehrere Artikelnummern, eine genuegt zur Pruefung
 function FirstArtNo(const _Value : String) : String;
 var
@@ -243,11 +255,22 @@ procedure NarrowDownFailure(_Ini : TMemIniFile; const _Section,_ArtNo : String;
 var
   otherMode : TOpenMasterdataDataPackagesSendMode;
   package : TOpenMasterdataAPI_DataPackage;
+  selected : TOpenMasterdataAPI_DataPackages;
   failing : String;
 begin
   Writeln('  EINGRENZUNG');
 
-  //Zuerst der andere Sendemodus: versteht der Lieferant die Paketliste nicht,
+  //Zuerst denselben Aufruf wiederholen. Gelingt er jetzt, war die Stoerung
+  //voruebergehend und jeder Schluss aus einem einzelnen Fehlversuch waere
+  //falsch. Ein Serverfehler tritt durchaus nur zeitweise auf.
+  if Probe(_Ini,_Section,'noch einmal, unveraendert',_ArtNo,
+       ConfiguredDataPackages(_Ini,_Section),_SendMode) then
+  begin
+    Writeln('    -> der Fehler war voruebergehend, die Konfiguration stimmt');
+    exit;
+  end;
+
+  //Dann der andere Sendemodus: versteht der Lieferant die Paketliste nicht,
   //scheitert jede Abfrage mit mehr als einem Paket.
   if _SendMode = omddpsm_PipeDelimited then
     otherMode := omddpsm_Exploded
@@ -255,16 +278,20 @@ begin
     otherMode := omddpsm_PipeDelimited;
 
   if Probe(_Ini,_Section,'alle Pakete, '+SendModeAsString(otherMode),_ArtNo,
-       TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,otherMode) then
+       ConfiguredDataPackages(_Ini,_Section),otherMode) then
   begin
-    Writeln('    -> DataPackageSendMode='+SendModeAsString(otherMode)+' eintragen');
+    Writeln('    -> mit DataPackageSendMode='+SendModeAsString(otherMode)+' geht es;');
+    Writeln('       vor dem Eintragen pruefen, ob dabei auch alle Felder ankommen');
     exit;
   end;
 
   //Sonst einzeln pruefen, welches Paket der Server nicht liefern kann
   failing := '';
+  //Nur die Pakete pruefen, die auch angefragt werden
+  selected := ConfiguredDataPackages(_Ini,_Section);
   for package := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
-    if not Probe(_Ini,_Section,
+    if (package in selected) and
+       not Probe(_Ini,_Section,
          'nur '+TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(package),
          _ArtNo,[package],_SendMode) then
     begin
@@ -283,6 +310,7 @@ var
   configurationFilename : String;
   ini : TMemIniFile;
   sections : TStringList;
+  unknownNames : TStringList;
   section,artNo,token,oauthResponse : String;
   client : IOpenMasterdataApiClient;
   res : TOpenMasterdataAPI_Result;
@@ -307,6 +335,7 @@ begin
 
   ini := TMemIniFile.Create(configurationFilename,TEncoding.UTF8);
   sections := TStringList.Create;
+  unknownNames := TStringList.Create;
   try
     ini.ReadSections(sections);
 
@@ -333,6 +362,13 @@ begin
               ', Scope '+YesNo(ini.ReadString(section,'ClientScope','') <> ''));
       Writeln('  OAuthURL          : '+ini.ReadString(section,'OAuthURL',''));
 
+      Writeln('  Datenpakete       : '+
+        StringReplace(TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
+          ConfiguredDataPackages(ini,section,unknownNames)),'%7C',', ',[rfReplaceAll]));
+      //Ein Tippfehler in der Konfiguration bliebe sonst unbemerkt
+      if unknownNames.Count > 0 then
+        Writeln('    unbekannt       : '+unknownNames.CommaText);
+
       artNo := FirstArtNo(ini.ReadString(section,'ArtNoAsCommatext',''));
       if artNo = '' then
       begin
@@ -346,7 +382,7 @@ begin
       dataReceived := false;
       try
         dataReceived := client.GetBySupplierPid(artNo,
-                          TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,res);
+                          ConfiguredDataPackages(ini,section),res);
       except
         on E:Exception do
           Writeln('  AUSNAHME          : '+E.ClassName+' '+ShortMsg(E.Message));
@@ -397,6 +433,7 @@ begin
     if (countLoginOk < countTotal) or (countDataOk < countTotal) then
       ExitCode := 1;
   finally
+    unknownNames.Free;
     sections.Free;
     ini.Free;
   end;

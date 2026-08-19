@@ -74,6 +74,8 @@ type
     //Lieferant sie verlangt. Sonst haengt die Bibliothek sie an den
     //Benutzernamen an und der Login schlaegt fehl.
     function ConfiguredCustomerNumber(const _Section : String) : String;
+    //Setzt die Haken der Datenpaketliste nach der Konfiguration
+    procedure ApplyConfiguredDataPackages(const _Section : String);
     procedure SetAuthorizationTarget(const _URL : String);
     function IsAuthorizationTarget(const _RequestUri : String) : Boolean;
   end;
@@ -113,6 +115,7 @@ begin
   //ClientScope=openMasterdata
   //GrantType=password or client_credentials
   //DataPackageSendMode=pipedelimited or exploded
+  //DataPackages=basic,prices,...  (leer oder fehlend: alle)
   //UsernameRequired=True or False
   //CustomernumberRequired=True or False
   //ClientSecretRequired=True or False
@@ -223,6 +226,7 @@ end;
 
 procedure TMainForm.ComboBox1Select(Sender: TObject);
 begin
+  ApplyConfiguredDataPackages(ComboBox1.Text);
   ListBox1.Items.CommaText := Configuration.ReadString(ComboBox1.Text,'ArtNoAsCommatext','');
   if ListBox1.Items.Count > 0 then
     ListBox1.ItemIndex := 0;
@@ -235,6 +239,7 @@ begin
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientScope',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
+  Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'DataPackages',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'UsernameRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'CustomernumberRequired',''));
   Memo2.Lines.Add(Configuration.ReadString(ComboBox1.Text,'ClientSecretRequired',''));
@@ -275,6 +280,35 @@ begin
   if not StrToBoolDef(Trim(Configuration.ReadString(_Section,'CustomernumberRequired','True')),true) then
     exit('');
   Result := Configuration.ReadString(_Section,'Customernumber','');
+end;
+
+procedure TMainForm.ApplyConfiguredDataPackages(const _Section : String);
+var
+  packages : TOpenMasterdataAPI_DataPackages;
+  unknownNames : TStringList;
+  i : Integer;
+  package : TOpenMasterdataAPI_DataPackage;
+begin
+  unknownNames := TStringList.Create;
+  try
+    //Ohne den Schluessel bleibt es bei allen Paketen
+    packages := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+                  Configuration.ReadString(_Section,'DataPackages',''),
+                  TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,
+                  unknownNames);
+
+    for i := 0 to CheckListBox1.Items.Count-1 do
+      if TOpenMasterdataAPI_DataPackageHelper.TryDataPackageFromString(
+           CheckListBox1.Items[i],package) then
+        CheckListBox1.Checked[i] := package in packages;
+
+    //Ein Tippfehler in der Konfiguration bliebe sonst unbemerkt
+    if unknownNames.Count > 0 then
+      MessageDlg('Unbekannte Datenpakete in der Konfiguration: '+
+        unknownNames.CommaText, mtWarning, [mbOK], 0);
+  finally
+    unknownNames.Free;
+  end;
 end;
 
 procedure TMainForm.SetAuthorizationTarget(const _URL : String);

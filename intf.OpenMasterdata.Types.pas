@@ -85,6 +85,16 @@ type
   public
     class function DataPackageAsString(_Val : TOpenMasterdataAPI_DataPackage) : String;
     class function DataPackagesAsString(_Val : TOpenMasterdataAPI_DataPackages) : String;
+    class function TryDataPackageFromString(const _Val : String;
+      out _DataPackage : TOpenMasterdataAPI_DataPackage) : Boolean;
+    //Liest eine Auswahl aus einer Aufzaehlung wie "basic,prices,pictures".
+    //Als Trenner gelten Komma, Semikolon, senkrechter Strich und Leerzeichen.
+    //Ist die Angabe leer oder nennt sie kein bekanntes Paket, gilt _Default:
+    //eine leere Auswahl wuerde jede Abfrage scheitern lassen. Nicht erkannte
+    //Namen sammelt _UnknownNames, damit der Aufrufer darauf hinweisen kann.
+    class function DataPackagesFromString(const _Val : String;
+      _Default : TOpenMasterdataAPI_DataPackages;
+      _UnknownNames : TStrings = nil) : TOpenMasterdataAPI_DataPackages;
   end;
 
   TOpenMasterdataAPI_Document = class
@@ -833,6 +843,57 @@ begin
     omd_datapackage_documents: Result := 'documents';
     else Result := 'basic';
   end;
+end;
+
+class function TOpenMasterdataAPI_DataPackageHelper.TryDataPackageFromString(
+  const _Val: String; out _DataPackage: TOpenMasterdataAPI_DataPackage): Boolean;
+var
+  i : TOpenMasterdataAPI_DataPackage;
+  trimmedValue : String;
+begin
+  Result := false;
+  trimmedValue := Trim(_Val);
+  if trimmedValue = '' then
+    exit;
+  for i := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+    if SameText(trimmedValue,DataPackageAsString(i)) then
+    begin
+      _DataPackage := i;
+      exit(true);
+    end;
+end;
+
+class function TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+  const _Val: String; _Default: TOpenMasterdataAPI_DataPackages;
+  _UnknownNames: TStrings): TOpenMasterdataAPI_DataPackages;
+var
+  names : TArray<String>;
+  name : String;
+  package : TOpenMasterdataAPI_DataPackage;
+begin
+  Result := [];
+  if Assigned(_UnknownNames) then
+    _UnknownNames.Clear;
+  if Trim(_Val) = '' then
+    exit(_Default);
+
+  names := _Val.Split([',',';','|',' '],TStringSplitOptions.ExcludeEmpty);
+  for name in names do
+  begin
+    if Trim(name) = '' then
+      continue;
+    if TryDataPackageFromString(name,package) then
+      Include(Result,package)
+    else
+    if Assigned(_UnknownNames) then
+      _UnknownNames.Add(Trim(name));
+  end;
+
+  //Eine Angabe, die kein bekanntes Paket nennt, ist ein Konfigurationsfehler.
+  //Mit einer leeren Auswahl wuerde jede Abfrage abgelehnt, deshalb gilt dann
+  //die Vorgabe. Ueber _UnknownNames bleibt der Fehler sichtbar.
+  if Result = [] then
+    Result := _Default;
 end;
 
 class function TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(

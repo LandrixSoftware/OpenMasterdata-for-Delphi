@@ -1025,6 +1025,85 @@ end;
 //darf. Ein Praefixvergleich waere hier eine Luecke.
 //Scheitert ein Login, entscheidet die Meldung darueber, ob der Anwender die
 //Ursache findet. Die Antworten stammen aus echten Zugaengen.
+//Die Auswahl der Datenpakete kommt aus der Konfiguration. Ein Tippfehler darf
+//nicht dazu fuehren, dass stillschweigend nichts oder etwas Falsches abgefragt
+//wird.
+procedure TestDataPackagesFromString;
+var
+  packages : TOpenMasterdataAPI_DataPackages;
+  unknownNames : TStringList;
+  package : TOpenMasterdataAPI_DataPackage;
+
+  function Parse(const _Value : String) : TOpenMasterdataAPI_DataPackages;
+  begin
+    Result := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(_Value,
+                TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,unknownNames);
+  end;
+
+begin
+  Writeln('Datenpakete aus der Konfiguration');
+
+  unknownNames := TStringList.Create;
+  try
+    //Ohne Angabe gilt die Vorgabe
+    Check('leere Angabe ergibt die Vorgabe',
+      Parse('') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+    Check('nur Leerzeichen ergibt die Vorgabe',
+      Parse('   ') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+
+    //Genau die genannten Pakete, nicht mehr
+    packages := Parse('basic,prices');
+    Check('basic ist enthalten',omd_datapackage_basic in packages);
+    Check('prices ist enthalten',omd_datapackage_prices in packages);
+    Check('additional ist nicht enthalten',not (omd_datapackage_additional in packages));
+    Check('documents ist nicht enthalten',not (omd_datapackage_documents in packages));
+
+    //Die Trenner, die in einer Ini-Datei vorkommen
+    Check('Semikolon trennt',Parse('basic;prices') = Parse('basic,prices'));
+    Check('senkrechter Strich trennt',Parse('basic|prices') = Parse('basic,prices'));
+    Check('Leerzeichen trennt',Parse('basic prices') = Parse('basic,prices'));
+    Check('Leerzeichen um die Namen stoeren nicht',
+      Parse(' basic , prices ') = Parse('basic,prices'));
+
+    //Gross- und Kleinschreibung wie in der Spec
+    Check('Grossschreibung wird erkannt',Parse('BASIC,Prices') = Parse('basic,prices'));
+
+    //Ein Tippfehler darf nicht stillschweigend untergehen
+    unknownNames.Clear;
+    packages := Parse('basic,preise');
+    Check('bekanntes Paket bleibt erhalten',omd_datapackage_basic in packages);
+    Check('unbekannter Name wird gemeldet',unknownNames.IndexOf('preise') >= 0,
+      unknownNames.CommaText);
+
+    //Nennt die Angabe nur Unsinn, waere eine leere Auswahl unbrauchbar
+    unknownNames.Clear;
+    Check('unbrauchbare Angabe ergibt die Vorgabe',
+      Parse('quatsch') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+    Check('auch dann wird der Name gemeldet',unknownNames.Count = 1,
+      unknownNames.CommaText);
+
+    //Doppelnennung ist harmlos
+    Check('Doppelnennung aendert nichts',Parse('basic,basic') = Parse('basic'));
+
+    //Jeder Paketname der Spec muss lesbar sein
+    for package := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
+    begin
+      unknownNames.Clear;
+      packages := Parse(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(package));
+      Check('Paketname '+TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(package)+
+        ' wird erkannt',(packages = [package]) and (unknownNames.Count = 0));
+    end;
+
+    //Der Weg zurueck muss dasselbe ergeben
+    Check('Hin- und Rueckweg stimmen ueberein',
+      Parse(StringReplace(TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
+        [omd_datapackage_basic,omd_datapackage_pictures]),'%7C',',',[rfReplaceAll])) =
+      [omd_datapackage_basic,omd_datapackage_pictures]);
+  finally
+    unknownNames.Free;
+  end;
+end;
+
 procedure TestOAuthFailureMessage;
 
   function Describe(const _Content : String) : String;
@@ -1224,6 +1303,8 @@ begin
     TestSameOrigin;
     Writeln;
     TestOAuthFailureMessage;
+    Writeln;
+    TestDataPackagesFromString;
     Writeln;
 
     if ParamCount > 0 then

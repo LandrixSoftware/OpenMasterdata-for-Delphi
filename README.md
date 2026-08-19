@@ -107,6 +107,8 @@ Der zweite Parameter (`pw` oder `cc`) hilft bei der Eingrenzung, wenn ein Endpun
 
 Abgefragt werden alle Datenpakete auf einmal; die Antwort wird eingelesen und es wird gemeldet, welche Bereiche tatsächlich gefüllt sind. Scheitert dieser Abruf, sucht das Programm die Ursache: es probiert den jeweils anderen `DataPackageSendMode` und danach jedes Datenpaket einzeln. Damit lässt sich unterscheiden, ob ein Lieferant die Paketliste anders erwartet oder ob er ein bestimmtes Datenpaket nicht ausliefern kann.
 
+Welche Datenpakete abgefragt werden, steuert der optionale Schlüssel `DataPackages` je Lieferant, etwa `DataPackages=basic,descriptions,logistics,pictures,documents`. Fehlt er oder ist er leer, werden alle Pakete angefragt. Das hilft bei Lieferanten, die ein einzelnes Paket nicht ausliefern können und die gesamte Abfrage daran scheitern lassen. Nicht erkannte Namen werden gemeldet statt übergangen.
+
 Als Vorlage für die Konfiguration dient `Samples\configuration.sample.ini`. Die echte `configuration.ini` enthält Zugangsdaten und ist von der Versionsverwaltung ausgenommen.
 
 ## Hinweise zu Rohstoffangaben
@@ -142,7 +144,7 @@ Die Spalten entsprechen den Schlüsseln in `configuration.ini`. `CustomerNumberR
 | FEGA & Schmitt Elektrogroßhandel GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Pietsch Haustechnik GmbH | ja | password | pipedelimited | ja | nein | nein |
 | Sanitär-Heinze GmbH & Co. KG | ja | password | pipedelimited | ja | nein | nein |
-| Friedrich Lange GmbH | ja | password | exploded | ja | ja | ja |
+| Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Sonepar | ja | password | exploded | ja | ja | nein |
 | Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
 | Reisser AG| ja | password | pipedelimited | ja | ja | nein |
