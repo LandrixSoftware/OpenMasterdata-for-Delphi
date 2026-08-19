@@ -292,6 +292,8 @@ type
     property constructionText : String read FconstructionText write FconstructionText;
     property CUperOU : double read FCUperOU write FCUperOU;
     property contentUnit : String read FcontentUnit write FcontentUnit;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_LogisticsMeasure = class
@@ -301,6 +303,8 @@ type
   public
     property measure : String read Fmeasure write Fmeasure;
     property unit_ : String read Funit_ write Funit_;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_LogisticsWeight = class
@@ -310,6 +314,8 @@ type
   public
     property weight : String read Fweight write Fweight;
     property unit_ : String read Funit_ write Funit_;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_CarryingCategory = (
@@ -436,6 +442,8 @@ type
     property weight : TOpenMasterdataAPI_LogisticsWeight read Fweight;
     property packagingQuantity : Integer read FpackagingQuantity write FpackagingQuantity;
     property packagingUnits : TOpenMasterdataAPI_PackagingUnitList read FpackagingUnits;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_TextRow = class
@@ -499,6 +507,8 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Price = class
@@ -516,6 +526,8 @@ type
     //Ab OM 11: untere Staffelgrenze, ab der dieser Preis gilt.
     //In Antworten nach 9.0.2 bleibt das Feld leer.
     property lowerBound : String read FlowerBound write FlowerBound;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   //Ab OM 11: Aktionspreis mit Gueltigkeitszeitraum
@@ -593,6 +605,8 @@ type
     property noMarketingBefore : TDateTime read FnoMarketingBefore write FnoMarketingBefore; //Keine Vermarktung vor
     property sparepartsystemURL : String read FsparepartsystemURL write FsparepartsystemURL; //URL Ersatzteilsystem
     property sparepartsystemdescription : String read Fsparepartsystemdescription write Fsparepartsystemdescription;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   //Rohstoffangaben
@@ -674,6 +688,8 @@ type
     property billBasis : String read FbillBasis write FbillBasis; //Abrechnungsbasis
     property rawMaterial : TOpenMasterdataAPI_Materials read FrawMaterial; //Liste von Materialzuschlägen
     property linePrice : TOpenMasterdataAPI_LinePriceList read FlinePrice;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Descriptions = class
@@ -687,6 +703,8 @@ type
     property productDescr : String read FproductDescr write FproductDescr;
     property shorttext2 : String read Fshorttext2 write Fshorttext2;
     property marketingText : String read FmarketingText write FmarketingText;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_Picture = class
@@ -753,6 +771,8 @@ type
     property pictures : TOpenMasterdataAPI_PictureList read Fpictures;
     property sparepartlist : TOpenMasterdataAPI_Sparepartlist read Fsparepartlist;
     property documents : TOpenMasterdataAPI_DocumentList read Fdocuments;
+    //Setzt alle Felder auf ihren Ausgangswert zurueck
+    procedure Clear;
   end;
 
   TOpenMasterdataAPI_ResultHelper = class helper for TOpenMasterdataAPI_Result
@@ -959,15 +979,28 @@ var
     Result := TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,_Value);
   end;
 
-  //Zahlfelder kommen je nach Lieferant als JSON-Zahl oder als String
+  //Zahlfelder kommen je nach Lieferant als JSON-Zahl oder als String.
+  //Auch eine dezimal geschriebene Ganzzahl wie 1024.0 wird uebernommen.
   function TryGetInt(_Json : TJSONValue; const _Name : String; out _Value : Integer) : Boolean;
   var
     scalarValue : String;
+    floatValue : Double;
   begin
     _Value := 0;
-    Result := TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,scalarValue);
-    if Result then
-      _Value := StrToIntDef(Trim(scalarValue),0);
+    Result := false;
+    if not TOpenMasterdataAPIHelper.JSONTryGetString(_Json,_Name,scalarValue) then
+      exit;
+    scalarValue := Trim(scalarValue);
+    if scalarValue = '' then
+      exit;
+    if TryStrToInt(scalarValue,_Value) then
+      exit(true);
+    //Ein nicht lesbarer Wert darf einen vorhandenen nicht mit 0 ueberschreiben
+    floatValue := TOpenMasterdataAPIHelper.JSONStrToFloat(scalarValue);
+    if floatValue = 0 then
+      exit;
+    _Value := Round(floatValue);
+    Result := true;
   end;
 
   procedure LoadPriceFromJson(_Val : TJSONValue; _Result : TOpenMasterdataAPI_Price);
@@ -1201,22 +1234,10 @@ begin
   end;
 
   try
-    //Mehrfachaufruf darf keine Eintraege anhaengen
-    pictures.Clear;
-    documents.Clear;
-    additional.alternativeProduct.Clear;
-    additional.followupProduct.Clear;
-    additional.accessories.Clear;
-    additional.sets.Clear;
-    additional.attribute.Clear;
-    logistics.packagingUnits.Clear;
-    prices.rawMaterial.Clear;
-    prices.linePrice.Clear;
-    prices.listPriceScale.Clear;
-    prices.netPriceScale.Clear;
-    prices.rrpScale.Clear;
-    prices.promotionalPrice.Clear;
-    status := 0;
+    //Mehrfachaufruf darf weder Eintraege anhaengen noch Werte des zuvor
+    //geladenen Artikels stehen lassen. Clear setzt Listen, Skalare und
+    //Unterobjekte gemeinsam zurueck.
+    Clear;
     sparepartlist.sparepartlistRow.Clear;
 
     //Ab OM 11: Status je Artikel
@@ -2067,6 +2088,155 @@ begin
   if Assigned(FtextRow) then begin FtextRow.Free; FtextRow := nil; end;
   if Assigned(FarticleRow) then begin FarticleRow.Free; FarticleRow := nil; end;
   inherited;
+end;
+
+procedure TOpenMasterdataAPI_LogisticsMeasure.Clear;
+begin
+  Funit_ := '';
+  Fmeasure := '';
+end;
+
+procedure TOpenMasterdataAPI_LogisticsWeight.Clear;
+begin
+  Funit_ := '';
+  Fweight := '';
+end;
+
+procedure TOpenMasterdataAPI_Price.Clear;
+begin
+  Fbasis := 0;
+  FquantityUnit := '';
+  Fvalue := '';
+  Fcurrency := '';
+  FlowerBound := '';
+end;
+
+procedure TOpenMasterdataAPI_Descriptions.Clear;
+begin
+  FproductDescr := '';
+  Fshorttext2 := '';
+  Fshorttext1 := '';
+  FmarketingText := '';
+end;
+
+procedure TOpenMasterdataAPI_Sparepartlist.Clear;
+begin
+  FlistNumber := '';
+  FsparepartlistRow.Clear;
+end;
+
+procedure TOpenMasterdataAPI_Prices.Clear;
+begin
+  FlistPrice.Clear;
+  FlinePrice.Clear;
+  FnetPrice.Clear;
+  FtaxCode := 0;
+  FbillBasis := '';
+  FrawMaterial.Clear;
+  FlistPriceScale.Clear;
+  FnetPriceScale.Clear;
+  FrrpScale.Clear;
+  FpromotionalPrice.Clear;
+end;
+
+procedure TOpenMasterdataAPI_Basic.Clear;
+begin
+  FendOfValidity := 0;
+  FproductShortDescr := '';
+  FpriceOnDemand := false;
+  FstartOfValidity := 0;
+  Fserie := '';
+  FproductType := '';
+  FnoteOfUse := '';
+  FcommodityGroupId := '';
+  Frrp.Clear;
+  FcommodityGroupDescr := '';
+  FmainCommodityGroupId := '';
+  FmodelNumber := '';
+  FnoOrderBefore := 0;
+  FnoDeliveryBefore := 0;
+  FnoMarketingBefore := 0;
+  FsparepartsystemURL := '';
+  Fsparepartsystemdescription := '';
+  Fmatchcode := '';
+  FmainCommodityGroupDescr := '';
+end;
+
+procedure TOpenMasterdataAPI_Additional.Clear;
+begin
+  FcontentUnit := '';
+  FCUperOU := 0;
+  FexpiringProduct := false;
+  FexpiringProductHasSuccessor := false;
+  FexpiringProductState := '';
+  FminOrderQuantity := 0;
+  FdeepLink := '';
+  FminOrderUnit := '';
+  Fsets.Clear;
+  Faccessories.Clear;
+  FexpiringDate := 0;
+  FarticleNumberCatalogue := '';
+  FalternativeProduct.Clear;
+  FfollowupProduct.Clear;
+  FconstructionText := '';
+  FdiscountGroupDescrManufacturer := '';
+  FconstructionTo := '';
+  FcommodityGroupIdManufacturer := '';
+  Fattribute.Clear;
+  FcommodityGroupDescrManufacturer := '';
+  FconstructionFrom := '';
+  FdiscountGroupIdManufacturer := '';
+  FbonusGroupIdManufacturer := '';
+  FproductGroupIdManufacturer := '';
+  FenergyEfficiencyClass := '';
+  FbonusGroupDescrManufacturer := '';
+  FaccessorieGroupIdManufacturer := '';
+  FaccessorieGroupDescrManufacturer := '';
+  FproductGroupDescrManufacturer := '';
+end;
+
+procedure TOpenMasterdataAPI_Logistics.Clear;
+begin
+  FmeasureB.Clear;
+  FmeasureC.Clear;
+  FmeasureA.Clear;
+  FhazardousMaterial := false;
+  Fexportable := false;
+  Fweight.Clear;
+  FcommodityNumber := 0;
+  FcountryOfOrigin := '';
+  FpackagingDisposalProvider := '';
+  FstandardDeliveryPeriod := 0;
+  FpackagingQuantity := 0;
+  FubaListConform := false;
+  FubaListRelevant := false;
+  FpackagingUnits.Clear;
+  FreachInfo := '';
+  FlucidNumber := '';
+  FdangerClass := '';
+  FunNumber := '';
+  FweeeNumber := '';
+  FcarryingCategory := omdCarryingCategory_None;
+  FreachDate := 0;
+  FdurabilityPeriod := 0;
+end;
+
+procedure TOpenMasterdataAPI_Result.Clear;
+begin
+  Fprices.Clear;
+  Fdocuments.Clear;
+  Fdescriptions.Clear;
+  Flogistics.Clear;
+  Fbasic.Clear;
+  Fpictures.Clear;
+  Fadditional.Clear;
+  FsupplierPid := '';
+  FmanufacturerPid := '';
+  FmanufacturerId := '';
+  FmanufacturerIdType := '';
+  Fgtin := '';
+  Fstatus := 0;
+  Fsparepartlist.Clear;
 end;
 
 end.

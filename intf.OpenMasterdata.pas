@@ -42,6 +42,11 @@ const
   COpenMasterdataStatusAmbiguous          = 952; //mehr als ein Treffer
   COpenMasterdataStatusInactive           = 960; //Artikel nicht mehr aktiv
 
+  //Obergrenzen fuer SetRetryPolicy. Sie halten die Wartezeitberechnung im
+  //gueltigen Zahlenbereich und verhindern absurd lange Blockaden.
+  CMaxRetryLimit = 10;
+  CMaxRetryDelayLimitSeconds = 300;
+
 type
   //Auf Unit-Ebene deklariert, damit sie schon im Interface verwendbar sind.
   //TOpenMasterdataApiClient fuehrt sie als TGrantType bzw.
@@ -137,6 +142,13 @@ type
     //Liefert false, wenn der Aufruf mit einer Exception endete.
     function ExecuteWithRetry(_Request : TRESTRequest; _Response : TRESTResponse) : Boolean;
     function TrySplitEndpointUrl(const _URL : String; out _Resource, _BaseUrl : String) : Boolean;
+    //Liest ein Endpunktfeld unter der Sperre. Ohne das koennte ein paralleler
+    //Setter den String freigeben, waehrend er als const-Parameter weitergereicht
+    //wird, denn const erhoeht den Referenzzaehler nicht.
+    function ReadEndpointUrl(const _Field : String) : String;
+    //Wartet, ohne die Sperre zu halten. Ein ueberlasteter Server wuerde sonst
+    //jeden weiteren Zugriff auf diese Verbindung blockieren.
+    procedure SleepWithoutLock(_Milliseconds : Integer);
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
@@ -439,6 +451,17 @@ begin
   FRESTClientByGTIN := TRESTClient.Create(nil);
   FRESTClientByGTIN.Name := 'RESTClientByGTIN';
 
+  //TRESTRequest.Execute wandelt jede Antwort ab Status 500 in eine
+  //ERESTException um, solange RaiseExceptionOn500 gesetzt ist. Damit waeren
+  //die Sonderstatus 950 bis 960 der Open-Masterdata-Spec und die Wiederholung
+  //bei 502, 503 und 504 nicht erreichbar, weil die Auswertung des Statuscodes
+  //nie stattfaende. Die Antwort ist zu diesem Zeitpunkt bereits vollstaendig
+  //gefuellt, der Code wertet sie selbst aus.
+  FRESTClientOAuth.RaiseExceptionOn500 := false;
+  FRESTClientBySupplierPID.RaiseExceptionOn500 := false;
+  FRESTClientByManufacturerData.RaiseExceptionOn500 := false;
+  FRESTClientByGTIN.RaiseExceptionOn500 := false;
+
   FLastOAuthResponseContent := '';
   FLastBySupplierPIDResponseContent := '';
   FLastErrorMessage := '';
@@ -578,7 +601,7 @@ begin
                             _Response.Headers.Values['Retry-After'],delayMilliseconds) then
       break;
 
-    Sleep(delayMilliseconds);
+    SleepWithoutLock(delayMilliseconds);
     Inc(attempt);
   until false;
 
@@ -591,8 +614,13 @@ begin
   try
     if _MaxRetries < 0 then
       _MaxRetries := 0;
+    //Obergrenze, sonst laeuft 1 shl _Attempt in der Wartezeitberechnung ueber
+    if _MaxRetries > CMaxRetryLimit then
+      _MaxRetries := CMaxRetryLimit;
     if _MaxDelaySeconds < 0 then
       _MaxDelaySeconds := 0;
+    if _MaxDelaySeconds > CMaxRetryDelayLimitSeconds then
+      _MaxDelaySeconds := CMaxRetryDelayLimitSeconds;
     FMaxRetries := _MaxRetries;
     FMaxRetryDelaySeconds := _MaxDelaySeconds;
   finally
@@ -612,6 +640,30 @@ begin
   if _ExpiresInSeconds > CSafetyMarginSeconds*2 then
     _ExpiresInSeconds := _ExpiresInSeconds - CSafetyMarginSeconds;
   Result := IncSecond(now,_ExpiresInSeconds);
+end;
+
+function TOpenMasterdataApiClient.ReadEndpointUrl(const _Field: String): String;
+begin
+  FCS.Acquire;
+  try
+    Result := _Field;
+  finally
+    FCS.Release;
+  end;
+end;
+
+procedure TOpenMasterdataApiClient.SleepWithoutLock(_Milliseconds: Integer);
+begin
+  if _Milliseconds <= 0 then
+    exit;
+  //Der Aufrufer haelt FCS. Waehrend der Wartezeit wird nichts geteiltes
+  //benutzt, deshalb wird die Sperre so lange abgegeben.
+  FCS.Release;
+  try
+    Sleep(_Milliseconds);
+  finally
+    FCS.Acquire;
+  end;
 end;
 
 class function TOpenMasterdataApiClient.StatusCodeToMessage(_StatusCode: Integer;
@@ -832,7 +884,8 @@ function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientBySupplierPID,FBySupplierPIDUrl,'supplierPid',_SupplierPid,_DataPackages,_Result);
+  Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(FBySupplierPIDUrl),
+    'supplierPid',_SupplierPid,_DataPackages,_Result);
 end;
 
 function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
@@ -840,7 +893,7 @@ function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientByManufacturerData,FByManufacturerDataUrl,
+  Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(FByManufacturerDataUrl),
     'manufacturerId',_ManufacturerId,
     'manufacturerIdType',_ManufacturerIdType,
     'manufacturerPid',_ManufacturerPid,
@@ -851,7 +904,7 @@ function TOpenMasterdataApiClient.GetByGTIN(_GTIN: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientByGTIN,FByGTINUrl,'gtin',_GTIN,_DataPackages,_Result);
+  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(FByGTINUrl),'gtin',_GTIN,_DataPackages,_Result);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
@@ -933,7 +986,10 @@ begin
     if not ExecuteWithRetry(RESTRequest,RESTResponse) then
       exit;
 
-    FLastErrorCode := RESTResponse.StatusCode;
+    //Nur im Fehlerfall setzen, damit GetLastErrorCode nach einem erfolgreichen
+    //Abruf 0 bleibt. Bei 950 und 951 bleibt der Code abfragbar.
+    if RESTResponse.StatusCode <> 200 then
+      FLastErrorCode := RESTResponse.StatusCode;
 
     //Ein abgelaufener oder zurueckgezogener Token muss verworfen werden,
     //sonst laufen alle weiteren Abfragen bis zum rechnerischen Ablauf in 401
@@ -1035,14 +1091,15 @@ begin
         //sonst haengt die zweite Antwort an der ersten
         lData.Clear;
         lResponse := lHttp.Get(_URL,lData,lHeaders);
-        FLastErrorCode := lResponse.StatusCode;
         Result := lResponse.StatusCode = 200;
+        if not Result then
+          FLastErrorCode := lResponse.StatusCode;
         if Result then
           break;
         if not TryGetRetryDelay(lResponse.StatusCode,lAttempt,FMaxRetries,FMaxRetryDelaySeconds,
                                 lResponse.HeaderValue['Retry-After'],lDelayMilliseconds) then
           break;
-        Sleep(lDelayMilliseconds);
+        SleepWithoutLock(lDelayMilliseconds);
         Inc(lAttempt);
       until false;
 

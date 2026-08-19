@@ -63,12 +63,15 @@ type
   public
     Configuration : TMemIniFile;
     CurrentAuthorizationToken : String;
-    //Praefix aus Schema und Host des API-Endpunkts. Nur an diese Adresse
+    //Schema, Host und Port des API-Endpunkts. Nur an genau diese Adresse
     //darf der Zugriffstoken gesendet werden.
+    CurrentAuthorizationScheme : String;
     CurrentAuthorizationHost : String;
-    //Bereits am WebView registrierter Filter, damit er nicht mehrfach anfaellt
-    RegisteredResourceFilter : String;
-    function HostPrefixOf(const _URL : String) : String;
+    CurrentAuthorizationPort : Integer;
+    //Bereits am WebView registrierte Filter, damit keiner doppelt anfaellt
+    RegisteredResourceFilters : TStringList;
+    procedure SetAuthorizationTarget(const _URL : String);
+    function IsAuthorizationTarget(const _RequestUri : String) : Boolean;
   end;
 
 var
@@ -82,6 +85,8 @@ procedure TMainForm.FormCreate(Sender: TObject);
 var
   basePath,configurationFilename : String;
 begin
+  RegisteredResourceFilters := TStringList.Create;
+
   if (Pos('Samples\Win32',Application.ExeName)>0) or (Pos('Samples\Win64',Application.ExeName)>0) then
     basePath := ExtractFilePath(ExtractFileDir(ExtractFileDir(Application.ExeName)))
   else
@@ -161,6 +166,7 @@ end;
 procedure TMainForm.FormDestroy(Sender: TObject);
 begin
   if Assigned(Configuration) then begin Configuration.Free; Configuration := nil; end;
+  if Assigned(RegisteredResourceFilters) then begin RegisteredResourceFilters.Free; RegisteredResourceFilters := nil; end;
 end;
 
 procedure TMainForm.Button1Click(Sender: TObject);
@@ -250,12 +256,18 @@ begin
     profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
-//Liefert Schema und Host einer konfigurierten URL, etwa https://api.example
-function TMainForm.HostPrefixOf(const _URL : String) : String;
+//Zerlegt die konfigurierte API-Adresse in Schema, Host und Port. Ein reiner
+//Praefixvergleich reicht hier nicht: "https://api.example" ist auch ein
+//Praefix von "https://api.example.angreifer.tld", und dorthin duerfte der
+//Zugriffstoken niemals gehen.
+procedure TMainForm.SetAuthorizationTarget(const _URL : String);
 var
   uri : TURI;
 begin
-  Result := '';
+  CurrentAuthorizationScheme := '';
+  CurrentAuthorizationHost := '';
+  CurrentAuthorizationPort := 0;
+
   if Trim(_URL) = '' then
     exit;
   try
@@ -266,7 +278,30 @@ begin
   end;
   if (uri.Scheme = '') or (uri.Host = '') then
     exit;
-  Result := uri.Scheme+'://'+uri.Host;
+
+  CurrentAuthorizationScheme := uri.Scheme;
+  CurrentAuthorizationHost := uri.Host;
+  CurrentAuthorizationPort := uri.Port;
+end;
+
+//Vergleicht Schema, Host und Port der angefragten Adresse mit dem
+//API-Endpunkt. Nur bei vollstaendiger Uebereinstimmung darf der Token mit.
+function TMainForm.IsAuthorizationTarget(const _RequestUri : String) : Boolean;
+var
+  uri : TURI;
+begin
+  Result := false;
+  if (CurrentAuthorizationHost = '') or (Trim(_RequestUri) = '') then
+    exit;
+  try
+    uri := TURI.Create(_RequestUri);
+  except
+    on E:Exception do
+      exit;
+  end;
+  Result := SameText(uri.Scheme,CurrentAuthorizationScheme) and
+            SameText(uri.Host,CurrentAuthorizationHost) and
+            (uri.Port = CurrentAuthorizationPort);
 end;
 
 procedure TMainForm.EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
@@ -295,13 +330,14 @@ begin
   if not Succeeded(request.Get_uri(requestURI)) or (requestURI = nil) then
     exit;
   try
-    if not StartsText(CurrentAuthorizationHost,String(requestURI)) then
+    if not IsAuthorizationTarget(String(requestURI)) then
       exit;
   finally
     CoTaskMemFree(requestURI);
   end;
 
-  request.Get_Headers(headers);
+  if not Succeeded(request.Get_Headers(headers)) or (headers = nil) then
+    exit;
   headers.SetHeader('Authorization',PChar('Bearer '+CurrentAuthorizationToken));
 
   //headers.SetHeader('User-Agent', PChar('TestBrowserDownload v' + GetVersion));
@@ -341,7 +377,9 @@ var
 begin
   Memo1.Clear;
   CurrentAuthorizationToken := '';
+  CurrentAuthorizationScheme := '';
   CurrentAuthorizationHost := '';
+  CurrentAuthorizationPort := 0;
   ListBox2.Clear;
 
   if ComboBox1.ItemIndex < 0 then
@@ -378,13 +416,19 @@ begin
 
     html := TOpenMasterdataAPI_ViewHelper.AsHtml(supplierPid);
     CurrentAuthorizationToken := client.GetCurrentAuthorizationToken;
-    CurrentAuthorizationHost := HostPrefixOf(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
+    SetAuthorizationTarget(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
 
-    //Filter nur fuer den API-Host registrieren, nicht fuer '*'
-    if (CurrentAuthorizationHost <> '') and (RegisteredResourceFilter <> CurrentAuthorizationHost) then
+    //Filter nur fuer den API-Host registrieren, nicht fuer '*'. Der Schraegstrich
+    //begrenzt den Host, sonst matcht der Filter auch api.example.angreifer.tld.
+    //Die eigentliche Absicherung leistet IsAuthorizationTarget im Handler.
+    if CurrentAuthorizationHost <> '' then
     begin
-      EdgeBrowser1.AddWebResourceRequestedFilter(PChar(CurrentAuthorizationHost+'*'), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
-      RegisteredResourceFilter := CurrentAuthorizationHost;
+      var resourceFilter : String := CurrentAuthorizationScheme+'://'+CurrentAuthorizationHost+'/*';
+      if RegisteredResourceFilters.IndexOf(resourceFilter) < 0 then
+      begin
+        EdgeBrowser1.AddWebResourceRequestedFilter(PChar(resourceFilter), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+        RegisteredResourceFilters.Add(resourceFilter);
+      end;
     end;
     EdgeBrowser1.NavigateToString(html);
 

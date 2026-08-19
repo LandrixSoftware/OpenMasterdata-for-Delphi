@@ -48,6 +48,10 @@ var
   html : TStringList;
   i : Integer;
 
+  const
+    CAllowedTags : array[0..13] of String = (
+      'p','br','div','span','ul','ol','li','table','tr','td','th','strong','em','b');
+
   function HtmlEncode(const _Value : String) : String;
   begin
     Result := StringReplace(_Value,'&','&amp;',[rfReplaceAll]);
@@ -60,16 +64,95 @@ var
   //ist hier zwingend: eine Sperrliste laesst sich mit Varianten wie
   //<img src=x onerror =...> oder <svg onload=...> umgehen.
   function IsAllowedTag(const _TagName : String) : Boolean;
-  const
-    CAllowedTags : array[0..13] of String = (
-      'p','br','div','span','ul','ol','li','table','tr','td','th','strong','em','b');
   var
     allowed : String;
   begin
     Result := false;
+    if _TagName = '' then
+      exit;
     for allowed in CAllowedTags do
       if SameText(_TagName,allowed) then
         exit(true);
+  end;
+
+  //Erkennt eine bereits maskierte Entity wie &amp; &szlig; oder &#160; ab der
+  //uebergebenen Position. Ohne diese Pruefung wuerde aus &szlig; die Zeichen-
+  //folge &amp;szlig; und der Anwender saehe den Entity-Namen im Klartext.
+  function IsEntityAt(const _Value : String; _Index : Integer) : Boolean;
+  const
+    CMaxEntityLength = 12;
+  var
+    j : Integer;
+    hasContent : Boolean;
+  begin
+    Result := false;
+    j := _Index+1;
+    if (j <= Length(_Value)) and (_Value[j] = '#') then
+      Inc(j);
+    hasContent := false;
+    while (j <= Length(_Value)) and (j - _Index <= CMaxEntityLength) and
+          CharInSet(_Value[j],['a'..'z','A'..'Z','0'..'9']) do
+    begin
+      hasContent := true;
+      Inc(j);
+    end;
+    Result := hasContent and (j <= Length(_Value)) and (_Value[j] = ';');
+  end;
+
+  //Liest ein Tag ab Position _Index. Nur wenn dort ein Tagname steht und ein
+  //schliessendes > folgt, gilt es als Tag; _Index steht danach hinter dem >.
+  //Sonst ist das < schlichter Text, etwa in "Druck < 3 bar", und darf den
+  //Folgetext nicht verschlucken.
+  function TryReadTag(const _Value : String; var _Index : Integer;
+    out _TagName : String; out _IsClosing : Boolean) : Boolean;
+  var
+    j,nameStart : Integer;
+  begin
+    Result := false;
+    _TagName := '';
+    _IsClosing := false;
+
+    j := _Index+1;
+    if (j <= Length(_Value)) and (_Value[j] = '/') then
+    begin
+      _IsClosing := true;
+      Inc(j);
+    end;
+
+    //Ein Tagname beginnt mit einem Buchstaben
+    if (j > Length(_Value)) or not CharInSet(_Value[j],['a'..'z','A'..'Z']) then
+      exit;
+    nameStart := j;
+    while (j <= Length(_Value)) and CharInSet(_Value[j],['a'..'z','A'..'Z','0'..'9']) do
+      Inc(j);
+    _TagName := Copy(_Value,nameStart,j-nameStart);
+
+    //Bis zum schliessenden > ueberspringen. Ein > innerhalb eines gequoteten
+    //Attributwerts beendet das Tag nicht.
+    while j <= Length(_Value) do
+    begin
+      if _Value[j] = '"' then
+      begin
+        Inc(j);
+        while (j <= Length(_Value)) and (_Value[j] <> '"') do
+          Inc(j);
+      end
+      else
+      if _Value[j] = #39 then
+      begin
+        Inc(j);
+        while (j <= Length(_Value)) and (_Value[j] <> #39) do
+          Inc(j);
+      end
+      else
+      if _Value[j] = '>' then
+      begin
+        _Index := j+1;
+        exit(true);
+      end;
+      Inc(j);
+    end;
+    //Kein schliessendes > gefunden, also kein Tag
   end;
 
   //Entfernt alle nicht erlaubten Tags und saemtliche Attribute. Damit bleiben
@@ -77,8 +160,8 @@ var
   //Ereignis-Attribute, Skripte und aktive URLs nicht ins Ergebnis gelangen.
   function SanitizeHtml(const _Value : String) : String;
   var
-    i,tagStart : Integer;
-    tagContent,tagName : String;
+    i : Integer;
+    tagName : String;
     isClosingTag : Boolean;
     builder : TStringBuilder;
   begin
@@ -90,51 +173,32 @@ var
         if _Value[i] <> '<' then
         begin
           //Zeichen ausserhalb von Tags werden maskiert
-          case _Value[i] of
-            '&' : builder.Append('&amp;');
-            '>' : builder.Append('&gt;');
-            '"' : builder.Append('&quot;');
+          if _Value[i] = '&' then
+          begin
+            if IsEntityAt(_Value,i) then
+              builder.Append('&')
+            else
+              builder.Append('&amp;');
+          end
+          else
+          if _Value[i] = '>' then
+            builder.Append('&gt;')
+          else
+          if _Value[i] = '"' then
+            builder.Append('&quot;')
           else
             builder.Append(_Value[i]);
-          end;
           Inc(i);
           continue;
         end;
 
-        tagStart := i;
-        Inc(i);
-        tagContent := '';
-        while (i <= Length(_Value)) and (_Value[i] <> '>') do
+        //Ein < ohne gueltiges Tag dahinter ist Text und bleibt erhalten
+        if not TryReadTag(_Value,i,tagName,isClosingTag) then
         begin
-          tagContent := tagContent + _Value[i];
-          Inc(i);
-        end;
-        if i > Length(_Value) then
-        begin
-          //Kein schliessendes >, der Rest ist Text
           builder.Append('&lt;');
-          builder.Append(HtmlEncode(Copy(_Value,tagStart+1,MaxInt)));
-          break;
+          Inc(i);
+          continue;
         end;
-        Inc(i); //das > ueberspringen
-
-        tagContent := Trim(tagContent);
-        isClosingTag := StartsText('/',tagContent);
-        if isClosingTag then
-          tagContent := Trim(Copy(tagContent,2,MaxInt));
-        //Selbstschliessendes Tag
-        tagContent := TrimRight(tagContent);
-        if EndsText('/',tagContent) then
-          tagContent := TrimRight(Copy(tagContent,1,Length(tagContent)-1));
-
-        //Nur der Tagname bis zum ersten Trennzeichen zaehlt, Attribute entfallen
-        tagName := tagContent;
-        for var charIndex := 1 to Length(tagContent) do
-          if CharInSet(tagContent[charIndex],[' ',#9,#10,#13,'/']) then
-          begin
-            tagName := Copy(tagContent,1,charIndex-1);
-            break;
-          end;
 
         if IsAllowedTag(tagName) then
         begin
@@ -154,20 +218,32 @@ var
     end;
   end;
 
+  //Loest den HTML-Modus nur aus, wenn tatsaechlich ein erlaubtes Tag vorkommt.
+  //Ein blosser Substring-Test wuerde auch bei Klartext wie "Druck <pmax> bar"
+  //oder "<phase L1>" anspringen und diesen Text anschliessend loeschen.
   function LooksLikeSupportedHtml(const _Value : String) : Boolean;
   var
-    trimmedValue : String;
+    i : Integer;
+    tagName : String;
+    isClosingTag : Boolean;
   begin
-    trimmedValue := TrimLeft(_Value);
-    Result := ContainsText(trimmedValue,'<div')
-      or ContainsText(trimmedValue,'<p')
-      or ContainsText(trimmedValue,'<ul')
-      or ContainsText(trimmedValue,'<ol')
-      or ContainsText(trimmedValue,'<table')
-      or ContainsText(trimmedValue,'<span')
-      or ContainsText(trimmedValue,'<br')
-      or ContainsText(trimmedValue,'<strong')
-      or ContainsText(trimmedValue,'<em');
+    Result := false;
+    i := 1;
+    while i <= Length(_Value) do
+    begin
+      if _Value[i] <> '<' then
+      begin
+        Inc(i);
+        continue;
+      end;
+      if TryReadTag(_Value,i,tagName,isClosingTag) then
+      begin
+        if IsAllowedTag(tagName) then
+          exit(true);
+      end
+      else
+        Inc(i);
+    end;
   end;
 
   function RenderDescription(const _Value : String) : String;
@@ -270,8 +346,9 @@ begin
     if _Val.descriptions.productDescr <> '' then
       html.Add(RenderDescription(_Val.descriptions.productDescr));
 
-    if (_Val.additional.deepLink <> '') then
-      html.Add('<a href="'+SafeUrl(_Val.additional.deepLink)+'" target="_blank" rel="noopener noreferrer">Weitere Details online</a><br/>');
+    var deepLinkUrl : String := SafeUrl(_Val.additional.deepLink);
+    if deepLinkUrl <> '' then
+      html.Add('<a href="'+deepLinkUrl+'" target="_blank" rel="noopener noreferrer">Weitere Details online</a><br/>');
     if _Val.basic.startOfValidity > 0 then
       html.Add('G&uuml;ltig ab: '+DateToStr(_Val.basic.startOfValidity)+'<br/>');
     if _Val.additional.expiringProduct then

@@ -259,6 +259,7 @@ begin
   else
   try
     CheckEquals('supplierPid trotz gtin 0','A2',res.supplierPid);
+    CheckEquals('gtin 0 bleibt 0','0',res.gtin);
   finally
     res.Free;
   end;
@@ -541,10 +542,241 @@ begin
   Check('Retry-After 60s wird abgelehnt',not Retry(429,0,'60'));
   Check('Retry-After genau am Limit gilt',Retry(429,0,'10'));
 
+  //Der exponentielle Abstand wird durch die Obergrenze gedeckelt
+  Check('vierter Versuch bei hoher Grenze',Retry(429,3,'',10,10));
+  CheckEqualsInt('vierter Versuch wartet 8s',8000,delay);
+  //1 shl 4 waeren 16s, die Obergrenze deckelt auf 10s
+  Check('fuenfter Versuch bei hoher Grenze',Retry(429,4,'',10,10));
+  CheckEqualsInt('Abstand auf Obergrenze gedeckelt',10000,delay);
+  Check('Retry-After am Limit',Retry(429,0,'10'));
+  CheckEqualsInt('Wartezeit am Limit',10000,delay);
+  Check('negatives Retry-After faellt auf Standardabstand zurueck',Retry(429,0,'-5'));
+  CheckEqualsInt('Standardabstand bei negativem Wert',1000,delay);
+
   //Ein HTTP-Datum in Retry-After wird nicht ausgewertet, dann greift der
   //exponentielle Abstand
   Check('HTTP-Datum faellt auf Standardabstand zurueck',Retry(429,0,'Wed, 21 Oct 2026 07:28:00 GMT'));
   CheckEqualsInt('Standardabstand',1000,delay);
+end;
+
+//Die Positivliste des Sanitizers: nicht erlaubte Tags muessen als Tag
+//verschwinden, nicht nur ihre Attribute.
+procedure TestSanitizerTagAllowlist;
+var
+  html : String;
+
+  function RenderDescr(const _Descr : String) : String;
+  var
+    r : TOpenMasterdataAPI_Result;
+    e : String;
+  begin
+    Result := '';
+    r := Parse('{"descriptions":{"productDescr":'+_Descr+'}}',e);
+    if r = nil then
+    begin
+      Check('Beschreibung parsebar',false,e);
+      exit;
+    end;
+    try
+      Result := TOpenMasterdataAPI_ViewHelper.AsHtml(r);
+    finally
+      r.Free;
+    end;
+  end;
+
+begin
+  Writeln('Sanitizer: Positivliste der Tags');
+
+  //Nicht erlaubte Tags duerfen nicht als Tag durchkommen
+  html := RenderDescr('"<div><img src=\"x\"><svg></svg><iframe></iframe><object></object></div>"');
+  Check('img verschwindet',not ContainsText(html,'<img'),html);
+  Check('svg verschwindet',not ContainsText(html,'<svg'),html);
+  Check('iframe verschwindet',not ContainsText(html,'<iframe'),html);
+  Check('object verschwindet',not ContainsText(html,'<object'),html);
+  Check('style verschwindet',not ContainsText(RenderDescr('"<div><style>x{}</style></div>"'),'<style'));
+
+  //Erlaubte Tags bleiben, damit die Liste nicht einfach leer sein kann
+  html := RenderDescr('"<div><p>A</p><ul><li>B</li></ul><strong>C</strong></div>"');
+  Check('div bleibt',ContainsText(html,'<div>'),html);
+  Check('p bleibt',ContainsText(html,'<p>A</p>'),html);
+  Check('li bleibt',ContainsText(html,'<li>B</li>'),html);
+  Check('strong bleibt',ContainsText(html,'<strong>C</strong>'),html);
+
+  //Gross-/Kleinschreibung
+  html := RenderDescr('"<DIV><P>Gross</P></DIV>"');
+  Check('Grossschreibung wird normalisiert',ContainsText(html,'<p>Gross</p>'),html);
+
+  //Attribute erlaubter Tags entfallen
+  html := RenderDescr('"<p style=\"a\" onclick=\"evil()\">Text</p>"');
+  Check('Attribut entfaellt',not ContainsText(html,'onclick'),html);
+  Check('Text bleibt',ContainsText(html,'Text'),html);
+end;
+
+//Der Sanitizer darf Text nicht beschaedigen.
+procedure TestSanitizerTextIntegrity;
+var
+  html : String;
+
+  function RenderDescr(const _Descr : String) : String;
+  var
+    r : TOpenMasterdataAPI_Result;
+    e : String;
+  begin
+    Result := '';
+    r := Parse('{"descriptions":{"productDescr":'+_Descr+'}}',e);
+    if r = nil then
+    begin
+      Check('Beschreibung parsebar',false,e);
+      exit;
+    end;
+    try
+      Result := TOpenMasterdataAPI_ViewHelper.AsHtml(r);
+    finally
+      r.Free;
+    end;
+  end;
+
+begin
+  Writeln('Sanitizer: Text bleibt unversehrt');
+
+  //Ein < im Fliesstext ist keine Tag-Eroeffnung und darf nichts verschlucken
+  html := RenderDescr('"<p>Druck < 3 bar und Temperatur > 5 Grad, Ende</p>"');
+  Check('Text nach < bleibt erhalten',ContainsText(html,'3 bar'),html);
+  Check('Text am Ende bleibt erhalten',ContainsText(html,'Ende'),html);
+
+  //Bereits maskierte Entities duerfen nicht ein zweites Mal maskiert werden
+  html := RenderDescr('"<p>Anschlussgroesse 1/2&quot; &amp; Dichtung &szlig; Ende</p>"');
+  Check('Entity bleibt einfach maskiert',not ContainsText(html,'&amp;szlig;'),html);
+  Check('kaufmaennisches Und bleibt Entity',not ContainsText(html,'&amp;amp;'),html);
+
+  //Klartext mit spitzen Klammern darf nicht als HTML gelten und geloescht werden
+  html := RenderDescr('"Druck <pmax> bar, Spannung <phase L1> pruefen"');
+  Check('pmax bleibt erhalten',ContainsText(html,'pmax'),html);
+  Check('phase bleibt erhalten',ContainsText(html,'phase'),html);
+end;
+
+//SafeUrl muss zulaessige Adressen durchlassen, sonst verschwindet die halbe Seite.
+procedure TestSafeUrlKeepsValidLinks;
+var
+  res : TOpenMasterdataAPI_Result;
+  err,html : String;
+begin
+  Writeln('Zulaessige Adressen bleiben erhalten');
+
+  res := Parse('{"additional":{"deepLink":"https://example.org/artikel/1"},'+
+               '"pictures":[{"url":"http://example.org/bild.jpg"}],'+
+               '"documents":[{"url":"https://example.org/datenblatt.pdf"}]}',err);
+  if res = nil then
+  begin
+    Check('Antwort parsebar',false,err);
+    exit;
+  end;
+  try
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('deepLink verlinkt',ContainsText(html,'href="https://example.org/artikel/1"'),html);
+    Check('Bild eingebunden',ContainsText(html,'src="http://example.org/bild.jpg"'),html);
+    Check('Dokument verlinkt',ContainsText(html,'href="https://example.org/datenblatt.pdf"'),html);
+  finally
+    res.Free;
+  end;
+
+  //Ein unzulaessiges Schema darf keinen Link erzeugen
+  res := Parse('{"additional":{"deepLink":"javascript:alert(1)"}}',err);
+  if res <> nil then
+  try
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('kein leerer Link bei unzulaessigem Schema',not ContainsText(html,'href=""'),html);
+  finally
+    res.Free;
+  end
+  else
+    Check('Antwort parsebar',false,err);
+end;
+
+//Ein zweites Laden darf keine Werte des ersten Artikels stehen lassen.
+procedure TestReloadResetsEverything;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Zweites Laden setzt alles zurueck');
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    Check('erstes Laden',res.TryLoadFromJson(
+      '{"supplierPid":"A1","gtin":"4001","status":"200",'+
+      '"basic":{"matchcode":"M1","noOrderBefore":"2026-01-01","rrp":{"value":"9.00"}},'+
+      '"descriptions":{"productDescr":"Text 1","shorttext1":"S1"},'+
+      '"additional":{"deepLink":"https://x/1","accessorieGroupIdManufacturer":"ZG1",'+
+      '"alternativeProduct":[{"supplierPid":"B1"}],"accessories":[{"supplierPid":"C1"}],'+
+      '"sets":[{"supplierPid":"D1"}],"attribute":[{"attributeName":"N"}],'+
+      '"followupProduct":[{"supplierPid":"E1"}]},'+
+      '"logistics":{"countryOfOrigin":"DE","measureA":{"measure":"5"},'+
+      '"weight":{"weight":"1.5"},"packagingUnits":[{"packagingType":"CT"}]},'+
+      '"prices":{"listPrice":[{"value":"10.00"},{"value":"9.00"}],'+
+      '"netPrice":{"value":"8.00"},"rawMaterial":[{"material":"CU"}],'+
+      '"linePrice":[{"value":"1.00"}],'+
+      '"promotionalPrice":[{"value":"7.00","startOfValidity":"2026-04-01"}]},'+
+      '"pictures":[{"url":"http://x/1.jpg"}],"documents":[{"url":"http://x/1.pdf"}],'+
+      '"sparepartlists":{"listNumber":"L1"}}',err),err);
+
+    //Zweites Laden mit einer Antwort, die fast nichts enthaelt
+    Check('zweites Laden',res.TryLoadFromJson('{"supplierPid":"A2"}',err),err);
+
+    CheckEquals('supplierPid neu','A2',res.supplierPid);
+    CheckEquals('gtin zurueckgesetzt','',res.gtin);
+    CheckEqualsInt('status zurueckgesetzt',0,res.status);
+    CheckEquals('matchcode zurueckgesetzt','',res.basic.matchcode);
+    Check('noOrderBefore zurueckgesetzt',res.basic.noOrderBefore = 0);
+    CheckEquals('basic.rrp zurueckgesetzt','',res.basic.rrp.value);
+    CheckEquals('productDescr zurueckgesetzt','',res.descriptions.productDescr);
+    CheckEquals('shorttext1 zurueckgesetzt','',res.descriptions.shorttext1);
+    CheckEquals('deepLink zurueckgesetzt','',res.additional.deepLink);
+    CheckEquals('Zubehoergruppe zurueckgesetzt','',res.additional.accessorieGroupIdManufacturer);
+    CheckEquals('countryOfOrigin zurueckgesetzt','',res.logistics.countryOfOrigin);
+    CheckEquals('measureA zurueckgesetzt','',res.logistics.measureA.measure);
+    CheckEquals('logistics.weight zurueckgesetzt','',res.logistics.weight.weight);
+    CheckEquals('listPrice zurueckgesetzt','',res.prices.listPrice.value);
+    CheckEquals('netPrice zurueckgesetzt','',res.prices.netPrice.value);
+    CheckEquals('sparepartlist zurueckgesetzt','',res.sparepartlist.listNumber);
+
+    //Alle Listen muessen leer sein
+    CheckEqualsInt('pictures leer',0,res.pictures.Count);
+    CheckEqualsInt('documents leer',0,res.documents.Count);
+    CheckEqualsInt('alternativeProduct leer',0,res.additional.alternativeProduct.Count);
+    CheckEqualsInt('followupProduct leer',0,res.additional.followupProduct.Count);
+    CheckEqualsInt('accessories leer',0,res.additional.accessories.Count);
+    CheckEqualsInt('sets leer',0,res.additional.sets.Count);
+    CheckEqualsInt('attribute leer',0,res.additional.attribute.Count);
+    CheckEqualsInt('packagingUnits leer',0,res.logistics.packagingUnits.Count);
+    CheckEqualsInt('rawMaterial leer',0,res.prices.rawMaterial.Count);
+    CheckEqualsInt('linePrice leer',0,res.prices.linePrice.Count);
+    CheckEqualsInt('listPriceScale leer',0,res.prices.listPriceScale.Count);
+    CheckEqualsInt('netPriceScale leer',0,res.prices.netPriceScale.Count);
+    CheckEqualsInt('rrpScale leer',0,res.prices.rrpScale.Count);
+    CheckEqualsInt('promotionalPrice leer',0,res.prices.promotionalPrice.Count);
+    CheckEqualsInt('sparepartlistRow leer',0,res.sparepartlist.sparepartlistRow.Count);
+  finally
+    res.Free;
+  end;
+end;
+
+//Enum-Codes muessen auf sich selbst zurueckabbilden, nicht nur ungleich Unknown sein.
+procedure TestEnumRoundTrip;
+var
+  code : String;
+begin
+  Writeln('Enum-Codes bilden auf sich selbst ab');
+
+  for code in ['BB','CT','GEB','PMS','BTL','STG'] do
+    CheckEquals('PackageType '+code,code,
+      TOpenMasterdataAPI_PackageTypeHelper.PackageTypeToStr(
+        TOpenMasterdataAPI_PackageTypeHelper.PackageTypeFromStr(code)));
+
+  for code in ['AL','CU','MK','SN','W'] do
+    CheckEquals('RawMaterial '+code,code,
+      TOpenMasterdataAPI_RawMaterialHelper.RawMaterialToStr(
+        TOpenMasterdataAPI_RawMaterialHelper.RawMaterialFromStr(code)));
 end;
 
 //Die HTML-Ausgabe darf keine aktiven Inhalte aus der Lieferantenantwort uebernehmen.
@@ -561,7 +793,12 @@ var
     Result := '';
     r := Parse('{"descriptions":{"productDescr":'+_Descr+'}}',e);
     if r = nil then
+    begin
+      //Ohne diese Meldung waeren alle folgenden Negativ-Pruefungen auf einem
+      //Leerstring trivial erfuellt und der Test damit wertlos
+      Check('Beschreibung parsebar',false,e);
       exit;
+    end;
     try
       Result := TOpenMasterdataAPI_ViewHelper.AsHtml(r);
     finally
@@ -644,7 +881,15 @@ begin
   begin
     res := Parse(TFile.ReadAllText(fileName,TEncoding.UTF8),err);
     try
-      Check(TPath.GetFileName(fileName),res <> nil,err);
+      //Nicht nur parsebar, sondern auch inhaltlich gefuellt
+      if res = nil then
+        Check(TPath.GetFileName(fileName),false,err)
+      else
+        //Mindestens ein Identifikationsmerkmal muss angekommen sein. Nicht jede
+        //Antwort enthaelt supplierPid, etwa die Verbandsdaten des ZVSHK.
+        Check(TPath.GetFileName(fileName),
+          (res.supplierPid <> '') or (res.gtin <> '') or (res.manufacturerPid <> ''),
+          'kein Identifikationsmerkmal gelesen, die Antwort wurde nicht ausgewertet');
     finally
       res.Free;
     end;
@@ -671,6 +916,7 @@ end;
 var
   responseFolder : String;
 begin
+  ReportMemoryLeaksOnShutdown := true;
   try
     Writeln('OpenMasterdata-for-Delphi - Parsertests');
     Writeln;
@@ -707,13 +953,25 @@ begin
     Writeln;
     TestHtmlSanitizing;
     Writeln;
+    TestSanitizerTagAllowlist;
+    Writeln;
+    TestSanitizerTextIntegrity;
+    Writeln;
+    TestSafeUrlKeepsValidLinks;
+    Writeln;
+    TestReloadResetsEverything;
+    Writeln;
+    TestEnumRoundTrip;
+    Writeln;
 
     if ParamCount > 0 then
       responseFolder := ParamStr(1)
     else
       responseFolder := LocateTestresponses;
     if responseFolder <> '' then
-      TestRealResponses(responseFolder);
+      TestRealResponses(responseFolder)
+    else
+      Writeln('Echte Lieferanten-Antworten: Ordner nicht gefunden, uebersprungen');
 
     Writeln('---');
     Writeln(Format('%d Tests, %d fehlgeschlagen',[TestsRun,TestsFailed]));
