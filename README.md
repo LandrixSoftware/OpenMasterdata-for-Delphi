@@ -88,6 +88,25 @@ Das Skript sucht eine installierte Delphi-Version, kompiliert die Tests und füh
 
 Neue Beispiel-Responses lassen sich damit direkt gegen die vorhandene Parserlogik prüfen.
 
+## Zugänge prüfen
+
+Die Tests unter `Tests` arbeiten ohne Netzwerk. Ob die hinterlegten Zugänge noch gelten, prüft ein zweites Konsolenprogramm:
+
+```
+Samples\LoginTest\run-logintest.bat
+```
+
+Es liest `Samples\configuration.ini`, meldet sich bei jedem darin konfigurierten Lieferanten an und ruft eine Artikelnummer aus `ArtNoAsCommatext` ab. Ausgegeben werden nur der Endpunkt, das Ergebnis und im Fehlerfall die Antwort des Servers — nicht die Zugangsdaten und nicht die OAuth-Antwort, die Zugriffs- und Refresh-Token im Klartext enthält.
+
+```
+run-logintest.bat Sonepar        nur Zugänge, deren Name das enthält
+run-logintest.bat Sonepar cc     zusätzlich den Grant-Type übersteuern
+```
+
+Der zweite Parameter (`pw` oder `cc`) hilft bei der Eingrenzung, wenn ein Endpunkt den konfigurierten Grant-Type ablehnt. Der Rückgabewert ist 0, wenn sich alle geprüften Zugänge anmelden konnten.
+
+Als Vorlage für die Konfiguration dient `Samples\configuration.sample.ini`. Die echte `configuration.ini` enthält Zugangsdaten und ist von der Versionsverwaltung ausgenommen.
+
 ## Hinweise zu Rohstoffangaben
 
 Die Dokumentation zu den Rohstoffangaben ist nicht durchgehend konsistent. In der mitgelieferten Diskussion zu `rawMaterial` wird ein urspruengliches Beispiel spaeter ausdruecklich als fachlich fehlerhaft bezeichnet.
