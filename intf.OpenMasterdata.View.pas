@@ -60,27 +60,13 @@ var
     Result := StringReplace(Result,'"','&quot;',[rfReplaceAll]);
   end;
 
-  //Nur diese Tags duerfen unveraendert durchgereicht werden. Eine Positivliste
-  //ist hier zwingend: eine Sperrliste laesst sich mit Varianten wie
-  //<img src=x onerror =...> oder <svg onload=...> umgehen.
-  function IsAllowedTag(const _TagName : String) : Boolean;
-  var
-    allowed : String;
-  begin
-    Result := false;
-    if _TagName = '' then
-      exit;
-    for allowed in CAllowedTags do
-      if SameText(_TagName,allowed) then
-        exit(true);
-  end;
-
   //Erkennt eine bereits maskierte Entity wie &amp; &szlig; oder &#160; ab der
   //uebergebenen Position. Ohne diese Pruefung wuerde aus &szlig; die Zeichen-
   //folge &amp;szlig; und der Anwender saehe den Entity-Namen im Klartext.
   function IsEntityAt(const _Value : String; _Index : Integer) : Boolean;
   const
-    CMaxEntityLength = 12;
+    //Der laengste HTML5-Entityname hat 31 Zeichen
+    CMaxEntityLength = 32;
   var
     j : Integer;
     hasContent : Boolean;
@@ -98,18 +84,71 @@ var
     Result := hasContent and (j <= Length(_Value)) and (_Value[j] = ';');
   end;
 
+  //Maskiert Text fuer die Ausgabe. Ein bereits maskiertes & bleibt unveraendert,
+  //damit Entities aus der Lieferantenbeschreibung nicht doppelt maskiert werden.
+  //#0 wird verworfen, weil es die Anzeige im WebView abschneiden wuerde.
+  function HtmlEncodeText(const _Value : String) : String;
+  var
+    i : Integer;
+    builder : TStringBuilder;
+  begin
+    builder := TStringBuilder.Create;
+    try
+      for i := 1 to Length(_Value) do
+      begin
+        case _Value[i] of
+          '&' : if IsEntityAt(_Value,i) then
+                  builder.Append('&')
+                else
+                  builder.Append('&amp;');
+          '<' : builder.Append('&lt;');
+          '>' : builder.Append('&gt;');
+          '"' : builder.Append('&quot;');
+          #0  : ;
+        else
+          builder.Append(_Value[i]);
+        end;
+      end;
+      Result := builder.ToString;
+    finally
+      builder.Free;
+    end;
+  end;
+
+  //Nur diese Tags duerfen unveraendert durchgereicht werden. Eine Positivliste
+  //ist hier zwingend: eine Sperrliste laesst sich mit Varianten wie
+  //<img src=x onerror =...> oder <svg onload=...> umgehen.
+  function IsAllowedTag(const _TagName : String) : Boolean;
+  var
+    allowed : String;
+  begin
+    Result := false;
+    if _TagName = '' then
+      exit;
+    for allowed in CAllowedTags do
+      if SameText(_TagName,allowed) then
+        exit(true);
+  end;
+
   //Liest ein Tag ab Position _Index. Nur wenn dort ein Tagname steht und ein
   //schliessendes > folgt, gilt es als Tag; _Index steht danach hinter dem >.
   //Sonst ist das < schlichter Text, etwa in "Druck < 3 bar", und darf den
   //Folgetext nicht verschlucken.
+  //
+  //Damit die Laufzeit linear bleibt, endet der Scan an zwei Stellen vorzeitig:
+  //an einem weiteren < ausserhalb von Anfuehrungszeichen, denn dort beginnt
+  //fruehestens das naechste Tag, und am Ende der Eingabe. Im zweiten Fall
+  //meldet _EndOfInput, dass im Rest kein Tag mehr folgen kann; der Aufrufer
+  //muss dann nicht Zeichen fuer Zeichen weitersuchen.
   function TryReadTag(const _Value : String; var _Index : Integer;
-    out _TagName : String; out _IsClosing : Boolean) : Boolean;
+    out _TagName : String; out _IsClosing : Boolean; out _EndOfInput : Boolean) : Boolean;
   var
     j,nameStart : Integer;
   begin
     Result := false;
     _TagName := '';
     _IsClosing := false;
+    _EndOfInput := false;
 
     j := _Index+1;
     if (j <= Length(_Value)) and (_Value[j] = '/') then
@@ -119,7 +158,12 @@ var
     end;
 
     //Ein Tagname beginnt mit einem Buchstaben
-    if (j > Length(_Value)) or not CharInSet(_Value[j],['a'..'z','A'..'Z']) then
+    if j > Length(_Value) then
+    begin
+      _EndOfInput := true;
+      exit;
+    end;
+    if not CharInSet(_Value[j],['a'..'z','A'..'Z']) then
       exit;
     nameStart := j;
     while (j <= Length(_Value)) and CharInSet(_Value[j],['a'..'z','A'..'Z','0'..'9']) do
@@ -135,6 +179,12 @@ var
         Inc(j);
         while (j <= Length(_Value)) and (_Value[j] <> '"') do
           Inc(j);
+        if j > Length(_Value) then
+        begin
+          //Nicht geschlossenes Anfuehrungszeichen, im Rest folgt kein Tag mehr
+          _EndOfInput := true;
+          exit;
+        end;
       end
       else
       if _Value[j] = #39 then
@@ -142,7 +192,16 @@ var
         Inc(j);
         while (j <= Length(_Value)) and (_Value[j] <> #39) do
           Inc(j);
+        if j > Length(_Value) then
+        begin
+          _EndOfInput := true;
+          exit;
+        end;
       end
+      else
+      if _Value[j] = '<' then
+        //Hier beginnt fruehestens das naechste Tag, dieses ist keins
+        exit
       else
       if _Value[j] = '>' then
       begin
@@ -151,7 +210,8 @@ var
       end;
       Inc(j);
     end;
-    //Kein schliessendes > gefunden, also kein Tag
+    //Kein schliessendes > bis zum Ende der Eingabe
+    _EndOfInput := true;
   end;
 
   //Entfernt alle nicht erlaubten Tags und saemtliche Attribute. Damit bleiben
@@ -161,7 +221,7 @@ var
   var
     i : Integer;
     tagName : String;
-    isClosingTag : Boolean;
+    isClosingTag,endOfInput : Boolean;
     builder : TStringBuilder;
   begin
     builder := TStringBuilder.Create;
@@ -172,28 +232,33 @@ var
         if _Value[i] <> '<' then
         begin
           //Zeichen ausserhalb von Tags werden maskiert
-          if _Value[i] = '&' then
-          begin
-            if IsEntityAt(_Value,i) then
-              builder.Append('&')
-            else
-              builder.Append('&amp;');
-          end
-          else
-          if _Value[i] = '>' then
-            builder.Append('&gt;')
-          else
-          if _Value[i] = '"' then
-            builder.Append('&quot;')
+          case _Value[i] of
+            //Eine bereits vorhandene Entity wie &szlig; darf nicht ein zweites
+            //Mal maskiert werden, sonst steht sie woertlich in der Anzeige
+            '&' : if IsEntityAt(_Value,i) then
+                    builder.Append('&')
+                  else
+                    builder.Append('&amp;');
+            '>' : builder.Append('&gt;');
+            '"' : builder.Append('&quot;');
+            //Ein Nullzeichen wuerde die Anzeige im WebView abschneiden
+            #0  : ;
           else
             builder.Append(_Value[i]);
+          end;
           Inc(i);
           continue;
         end;
 
         //Ein < ohne gueltiges Tag dahinter ist Text und bleibt erhalten
-        if not TryReadTag(_Value,i,tagName,isClosingTag) then
+        if not TryReadTag(_Value,i,tagName,isClosingTag,endOfInput) then
         begin
+          if endOfInput then
+          begin
+            //Im Rest folgt kein Tag mehr, er ist vollstaendig Text
+            builder.Append(HtmlEncodeText(Copy(_Value,i,MaxInt)));
+            break;
+          end;
           builder.Append('&lt;');
           Inc(i);
           continue;
@@ -224,7 +289,7 @@ var
   var
     i : Integer;
     tagName : String;
-    isClosingTag : Boolean;
+    isClosingTag,endOfInput : Boolean;
   begin
     Result := false;
     i := 1;
@@ -235,13 +300,17 @@ var
         Inc(i);
         continue;
       end;
-      if TryReadTag(_Value,i,tagName,isClosingTag) then
+      if TryReadTag(_Value,i,tagName,isClosingTag,endOfInput) then
       begin
         if IsAllowedTag(tagName) then
           exit(true);
       end
       else
+      begin
+        if endOfInput then
+          exit;
         Inc(i);
+      end;
     end;
   end;
 
@@ -253,7 +322,8 @@ var
     if LooksLikeSupportedHtml(_Value) then
       exit(SanitizeHtml(_Value));
 
-    Result := HtmlEncode(_Value);
+    //Auch ohne Tags kann der Text bereits Entities enthalten, etwa &szlig;
+    Result := HtmlEncodeText(_Value);
     Result := StringReplace(Result,sLineBreak,'<br/>',[rfReplaceAll]);
     Result := StringReplace(Result,#10,'<br/>',[rfReplaceAll]);
     Result := StringReplace(Result,#13,'',[rfReplaceAll]);

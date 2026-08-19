@@ -51,6 +51,9 @@ type
   //Auf Unit-Ebene deklariert, damit sie schon im Interface verwendbar sind.
   //TOpenMasterdataApiClient fuehrt sie als TGrantType bzw.
   //TDataPackagesSendMode weiter, bestehender Code bleibt gueltig.
+  //Auswahl eines Produktendpunkts fuer den gesperrten Zugriff auf sein Feld
+  TEndpointKind = (epBySupplierPid,epByManufacturerData,epByGTIN);
+
   TOpenMasterdataGrantType = (omdgt_Password,omdgt_ClientCredentials);
   TOpenMasterdataDataPackagesSendMode = (omddpsm_PipeDelimited,omddpsm_Exploded);
 
@@ -132,6 +135,10 @@ type
 
     FMaxRetries : Integer;
     FMaxRetryDelaySeconds : Integer;
+    //Wird bei jeder Konfigurationsaenderung erhoeht. Ein Wiederholungsversuch
+    //bricht ab, wenn sich die Konfiguration waehrend der Wartezeit geaendert
+    //hat, denn der vorbereitete Request zeigt dann auf den alten Endpunkt.
+    FConfigGeneration : Integer;
 
     function LoggedIn: Boolean;
     function Login : Boolean;
@@ -142,13 +149,12 @@ type
     //Liefert false, wenn der Aufruf mit einer Exception endete.
     function ExecuteWithRetry(_Request : TRESTRequest; _Response : TRESTResponse) : Boolean;
     function TrySplitEndpointUrl(const _URL : String; out _Resource, _BaseUrl : String) : Boolean;
-    //Liest ein Endpunktfeld unter der Sperre. Ohne das koennte ein paralleler
-    //Setter den String freigeben, waehrend er als const-Parameter weitergereicht
-    //wird, denn const erhoeht den Referenzzaehler nicht.
-    function ReadEndpointUrl(const _Field : String) : String;
-    //Wartet, ohne die Sperre zu halten. Ein ueberlasteter Server wuerde sonst
-    //jeden weiteren Zugriff auf diese Verbindung blockieren.
-    procedure SleepWithoutLock(_Milliseconds : Integer);
+    //Liest die Adresse eines Endpunkts unter der Sperre. Der Endpunkt wird
+    //ueber das Enum ausgewaehlt und nicht als const-String uebergeben: bei
+    //const erhoeht Delphi den Referenzzaehler nicht, und der Zeiger waere
+    //bereits vor dem Acquire geladen.
+    function ReadEndpointUrl(_Endpoint : TEndpointKind) : String;
+    function SleepWithoutLock(_Milliseconds : Integer) : Boolean;
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
@@ -181,6 +187,16 @@ type
     //ist. Als reine Funktion ausgelegt, damit sie sich testen laesst.
     class function TryGetRetryDelay(_StatusCode, _Attempt, _MaxRetries, _MaxDelaySeconds : Integer;
       const _RetryAfterHeader : String; out _DelayMilliseconds : Integer) : Boolean; static;
+    //Begrenzt die Werte einer Wiederholungsstrategie auf den zulaessigen
+    //Bereich. Als reine Funktion ausgelegt, damit sie sich testen laesst.
+    class procedure ClampRetryPolicy(var _MaxRetries, _MaxDelaySeconds : Integer); static;
+    //Prueft, ob eine Adresse denselben Ursprung hat wie der angegebene
+    //Endpunkt, also Schema, Host und Port uebereinstimmen. Ein Praefixvergleich
+    //reicht dafuer nicht: zu "https://api.example" passt sonst auch
+    //"https://api.example.angreifer.tld". Wird von Anwendungen gebraucht, die
+    //den Zugriffstoken nur an den API-Host senden duerfen.
+    class function IsSameOrigin(const _RequestUri, _Scheme, _Host : String;
+      _Port : Integer) : Boolean; static;
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
@@ -476,6 +492,7 @@ begin
   //Wartezeiten aus Retry-After werden nicht abgewartet, siehe SetRetryPolicy.
   FMaxRetries := 2;
   FMaxRetryDelaySeconds := 10;
+  FConfigGeneration := 0;
 end;
 
 destructor TOpenMasterdataApiClient.Destroy;
@@ -601,7 +618,11 @@ begin
                             _Response.Headers.Values['Retry-After'],delayMilliseconds) then
       break;
 
-    SleepWithoutLock(delayMilliseconds);
+    if not SleepWithoutLock(delayMilliseconds) then
+    begin
+      FLastErrorMessage := 'Die Konfiguration hat sich waehrend der Wartezeit geaendert.';
+      exit;
+    end;
     Inc(attempt);
   until false;
 
@@ -612,15 +633,7 @@ procedure TOpenMasterdataApiClient.SetRetryPolicy(_MaxRetries, _MaxDelaySeconds:
 begin
   FCS.Acquire;
   try
-    if _MaxRetries < 0 then
-      _MaxRetries := 0;
-    //Obergrenze, sonst laeuft 1 shl _Attempt in der Wartezeitberechnung ueber
-    if _MaxRetries > CMaxRetryLimit then
-      _MaxRetries := CMaxRetryLimit;
-    if _MaxDelaySeconds < 0 then
-      _MaxDelaySeconds := 0;
-    if _MaxDelaySeconds > CMaxRetryDelayLimitSeconds then
-      _MaxDelaySeconds := CMaxRetryDelayLimitSeconds;
+    ClampRetryPolicy(_MaxRetries,_MaxDelaySeconds);
     FMaxRetries := _MaxRetries;
     FMaxRetryDelaySeconds := _MaxDelaySeconds;
   finally
@@ -642,28 +655,76 @@ begin
   Result := IncSecond(now,_ExpiresInSeconds);
 end;
 
-function TOpenMasterdataApiClient.ReadEndpointUrl(const _Field: String): String;
+function TOpenMasterdataApiClient.ReadEndpointUrl(_Endpoint: TEndpointKind): String;
 begin
   FCS.Acquire;
   try
-    Result := _Field;
+    case _Endpoint of
+      epBySupplierPid:      Result := FBySupplierPIDUrl;
+      epByManufacturerData: Result := FByManufacturerDataUrl;
+      epByGTIN:             Result := FByGTINUrl;
+    else
+      Result := '';
+    end;
   finally
     FCS.Release;
   end;
 end;
 
-procedure TOpenMasterdataApiClient.SleepWithoutLock(_Milliseconds: Integer);
+//Wartet, ohne die Sperre zu halten, und meldet zurueck, ob die Konfiguration
+//unveraendert geblieben ist. Nur dann darf der vorbereitete Request wiederholt
+//werden: ein zwischenzeitlich geaenderter Endpunkt wuerde ihn sonst samt
+//Zugriffstoken an eine andere Adresse senden.
+function TOpenMasterdataApiClient.SleepWithoutLock(_Milliseconds: Integer): Boolean;
+var
+  generationBefore : Integer;
 begin
-  if _Milliseconds <= 0 then
-    exit;
-  //Der Aufrufer haelt FCS. Waehrend der Wartezeit wird nichts geteiltes
-  //benutzt, deshalb wird die Sperre so lange abgegeben.
-  FCS.Release;
-  try
-    Sleep(_Milliseconds);
-  finally
-    FCS.Acquire;
+  generationBefore := FConfigGeneration;
+  if _Milliseconds > 0 then
+  begin
+    FCS.Release;
+    try
+      Sleep(_Milliseconds);
+    finally
+      FCS.Acquire;
+    end;
   end;
+  Result := FConfigGeneration = generationBefore;
+end;
+
+class procedure TOpenMasterdataApiClient.ClampRetryPolicy(var _MaxRetries,
+  _MaxDelaySeconds: Integer);
+begin
+  if _MaxRetries < 0 then
+    _MaxRetries := 0;
+  //Obergrenze, sonst laeuft 1 shl _Attempt in der Wartezeitberechnung ueber
+  if _MaxRetries > CMaxRetryLimit then
+    _MaxRetries := CMaxRetryLimit;
+  if _MaxDelaySeconds < 0 then
+    _MaxDelaySeconds := 0;
+  if _MaxDelaySeconds > CMaxRetryDelayLimitSeconds then
+    _MaxDelaySeconds := CMaxRetryDelayLimitSeconds;
+end;
+
+class function TOpenMasterdataApiClient.IsSameOrigin(const _RequestUri, _Scheme,
+  _Host: String; _Port: Integer): Boolean;
+var
+  uri : TURI;
+begin
+  Result := false;
+  if (_Host = '') or (Trim(_RequestUri) = '') then
+    exit;
+  try
+    uri := TURI.Create(_RequestUri);
+  except
+    //Formen wie data:, blob:, about:blank oder relative Pfade sind kein
+    //Ursprung im Sinne dieser Pruefung
+    on E:Exception do
+      exit;
+  end;
+  Result := SameText(uri.Scheme,_Scheme) and
+            SameText(uri.Host,_Host) and
+            (uri.Port = _Port);
 end;
 
 class function TOpenMasterdataApiClient.StatusCodeToMessage(_StatusCode: Integer;
@@ -884,7 +945,7 @@ function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(FBySupplierPIDUrl),
+  Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(epBySupplierPid),
     'supplierPid',_SupplierPid,_DataPackages,_Result);
 end;
 
@@ -893,7 +954,7 @@ function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(FByManufacturerDataUrl),
+  Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(epByManufacturerData),
     'manufacturerId',_ManufacturerId,
     'manufacturerIdType',_ManufacturerIdType,
     'manufacturerPid',_ManufacturerPid,
@@ -904,7 +965,7 @@ function TOpenMasterdataApiClient.GetByGTIN(_GTIN: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
 begin
-  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(FByGTINUrl),'gtin',_GTIN,_DataPackages,_Result);
+  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,_DataPackages,_Result);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
@@ -1092,14 +1153,21 @@ begin
         lData.Clear;
         lResponse := lHttp.Get(_URL,lData,lHeaders);
         Result := lResponse.StatusCode = 200;
-        if not Result then
+        //Auch nach einem zuvor gescheiterten Versuch muss der Code stimmen
+        if Result then
+          FLastErrorCode := 0
+        else
           FLastErrorCode := lResponse.StatusCode;
         if Result then
           break;
         if not TryGetRetryDelay(lResponse.StatusCode,lAttempt,FMaxRetries,FMaxRetryDelaySeconds,
                                 lResponse.HeaderValue['Retry-After'],lDelayMilliseconds) then
           break;
-        SleepWithoutLock(lDelayMilliseconds);
+        if not SleepWithoutLock(lDelayMilliseconds) then
+        begin
+          FLastErrorMessage := 'Die Konfiguration hat sich waehrend der Wartezeit geaendert.';
+          break;
+        end;
         Inc(lAttempt);
       until false;
 
@@ -1208,6 +1276,7 @@ begin
   try
     if TrySplitEndpointUrl(_URL,FBySupplierPIDUrl,baseUrl) then
       SetupProductRestClient(FRESTClientBySupplierPID,baseUrl);
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;
@@ -1221,6 +1290,7 @@ begin
   try
     if TrySplitEndpointUrl(_URL,FByManufacturerDataUrl,baseUrl) then
       SetupProductRestClient(FRESTClientByManufacturerData,baseUrl);
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;
@@ -1234,6 +1304,7 @@ begin
   try
     if TrySplitEndpointUrl(_URL,FByGTINUrl,baseUrl) then
       SetupProductRestClient(FRESTClientByGTIN,baseUrl);
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;
@@ -1247,6 +1318,7 @@ begin
   try
     if TrySplitEndpointUrl(_URL,FOAuthUrl,baseUrl) then
       FRESTClientOAuth.BaseURL := baseUrl;
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;
@@ -1257,6 +1329,7 @@ begin
   FCS.Acquire;
   try
     FCustomerId := _CustomerId;
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;
@@ -1287,6 +1360,7 @@ begin
     FAccessToken := '';
     FRefreshToken := '';
     FAccessTokenValidTo := 0;
+    Inc(FConfigGeneration);
   finally
     FCS.Release;
   end;

@@ -965,7 +965,6 @@ var
   messageJson:      TJSONValue;
 
   jsonString  : TJSONString;
-  jsonNumber : TJSONNumber;
   jsonArray,jsonArray2 : TJSONArray;
   jsonBool : TJSONBool;
   jsonValue,jsonValue2,jsonValue3 : TJSONValue;
@@ -995,11 +994,15 @@ var
       exit;
     if TryStrToInt(scalarValue,_Value) then
       exit(true);
-    //Ein nicht lesbarer Wert darf einen vorhandenen nicht mit 0 ueberschreiben
+    //Dezimal geschriebene Ganzzahlen wie 1024.0 gelten ebenfalls. Ein echter
+    //Kommawert ist dagegen fachlich unzulaessig und wird nicht gerundet.
+    //Ein nicht lesbarer Wert darf einen vorhandenen nicht mit 0 ueberschreiben.
     floatValue := TOpenMasterdataAPIHelper.JSONStrToFloat(scalarValue);
-    if floatValue = 0 then
+    if (floatValue = 0) or (Frac(floatValue) <> 0) then
       exit;
-    _Value := Round(floatValue);
+    if (floatValue > MaxInt) or (floatValue < -MaxInt) then
+      exit;
+    _Value := Trunc(floatValue);
     Result := true;
   end;
 
@@ -1208,6 +1211,10 @@ begin
   Result := false;
   _Error := '';
 
+  //Vor dem Parseversuch leeren. Sonst behielte das Objekt bei einer
+  //unlesbaren Antwort die Daten des zuvor geladenen Artikels.
+  Clear;
+
   try
     messageJson := TJSONObject.ParseJSONValue(
          TOpenMasterdataHelper.FixJson(_JsonValue),
@@ -1234,11 +1241,6 @@ begin
   end;
 
   try
-    //Mehrfachaufruf darf weder Eintraege anhaengen noch Werte des zuvor
-    //geladenen Artikels stehen lassen. Clear setzt Listen, Skalare und
-    //Unterobjekte gemeinsam zurueck.
-    Clear;
-    sparepartlist.sparepartlistRow.Clear;
 
     //Ab OM 11: Status je Artikel
     if TryGetInt(messageJson,'status',intValue) then
@@ -1395,9 +1397,6 @@ begin
       end;
       if TryGetString(jsonValue,'deepLink',valueAsString) then
         additional.deepLink := valueAsString;
-      additional.expiringProduct := false;
-      additional.expiringProductHasSuccessor := false;
-      additional.expiringProductState := '';
       if TryGetString(jsonValue,'expiringProduct',valueAsString) then
       begin
         //Kommt je nach Lieferant als String (No/Yes/Yes-Successor) oder als JSON-Boolean.
@@ -2128,6 +2127,7 @@ end;
 procedure TOpenMasterdataAPI_Prices.Clear;
 begin
   FlistPrice.Clear;
+  frrp.Clear;
   FlinePrice.Clear;
   FnetPrice.Clear;
   FtaxCode := 0;

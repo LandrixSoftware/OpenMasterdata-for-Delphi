@@ -286,22 +286,11 @@ end;
 
 //Vergleicht Schema, Host und Port der angefragten Adresse mit dem
 //API-Endpunkt. Nur bei vollstaendiger Uebereinstimmung darf der Token mit.
+//Die Pruefung selbst liegt in der Bibliothek, weil sie dort getestet wird.
 function TMainForm.IsAuthorizationTarget(const _RequestUri : String) : Boolean;
-var
-  uri : TURI;
 begin
-  Result := false;
-  if (CurrentAuthorizationHost = '') or (Trim(_RequestUri) = '') then
-    exit;
-  try
-    uri := TURI.Create(_RequestUri);
-  except
-    on E:Exception do
-      exit;
-  end;
-  Result := SameText(uri.Scheme,CurrentAuthorizationScheme) and
-            SameText(uri.Host,CurrentAuthorizationHost) and
-            (uri.Port = CurrentAuthorizationPort);
+  Result := TOpenMasterdataApiClient.IsSameOrigin(_RequestUri,
+    CurrentAuthorizationScheme,CurrentAuthorizationHost,CurrentAuthorizationPort);
 end;
 
 procedure TMainForm.EdgeBrowser1WebResourceRequested(Sender: TCustomEdgeBrowser;
@@ -423,7 +412,15 @@ begin
     //Die eigentliche Absicherung leistet IsAuthorizationTarget im Handler.
     if CurrentAuthorizationHost <> '' then
     begin
-      var resourceFilter : String := CurrentAuthorizationScheme+'://'+CurrentAuthorizationHost+'/*';
+      //Der Port gehoert in den Filter. Fehlt er bei einem abweichenden Port,
+      //feuert das Ereignis nicht, der Token fehlt und der Server antwortet 401.
+      //Den Standardport laesst WebView2 in der Adresse weg, deshalb entfaellt
+      //er auch hier.
+      var resourceFilter : String := CurrentAuthorizationScheme+'://'+CurrentAuthorizationHost;
+      if not (((CurrentAuthorizationPort = 443) and SameText(CurrentAuthorizationScheme,'https')) or
+              ((CurrentAuthorizationPort = 80) and SameText(CurrentAuthorizationScheme,'http'))) then
+        resourceFilter := resourceFilter+':'+IntToStr(CurrentAuthorizationPort);
+      resourceFilter := resourceFilter+'/*';
       if RegisteredResourceFilters.IndexOf(resourceFilter) < 0 then
       begin
         EdgeBrowser1.AddWebResourceRequestedFilter(PChar(resourceFilter), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);

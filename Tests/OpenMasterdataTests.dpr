@@ -73,6 +73,13 @@ begin
   Check(_Name,_Expected = _Actual,'erwartet '+IntToStr(_Expected)+', war '+IntToStr(_Actual));
 end;
 
+//Datum in fester Schreibweise, damit die Tests unabhaengig von den
+//Regionseinstellungen des Rechners sind.
+function AsIsoDate(_Value : TDateTime) : String;
+begin
+  Result := FormatDateTime('yyyy-mm-dd',_Value);
+end;
+
 //Laedt JSON in ein frisches Ergebnisobjekt. Der Aufrufer gibt es frei.
 function Parse(const _Json : String; out _Error : String) : TOpenMasterdataAPI_Result;
 begin
@@ -226,9 +233,11 @@ procedure TestDateFormats;
 begin
   Writeln('Datumsformate');
 
-  CheckEquals('ISO','21.04.2026',DateToStr(TOpenMasterdataAPIHelper.JSONStrToDate('2026-04-21')));
-  CheckEquals('YYYYMMDD','21.04.2026',DateToStr(TOpenMasterdataAPIHelper.JSONStrToDate('20260421')));
-  CheckEquals('DDMMYYYY','21.04.2026',DateToStr(TOpenMasterdataAPIHelper.JSONStrToDate('21042026')));
+  //Nicht ueber DateToStr vergleichen, dessen Ergebnis haengt von den
+  //Regionseinstellungen des Rechners ab
+  CheckEquals('ISO','2026-04-21',AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('2026-04-21')));
+  CheckEquals('YYYYMMDD','2026-04-21',AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('20260421')));
+  CheckEquals('DDMMYYYY','2026-04-21',AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('21042026')));
   Check('leerer Wert ergibt 0',TOpenMasterdataAPIHelper.JSONStrToDate('') = 0);
   Check('Unsinn ergibt 0',TOpenMasterdataAPIHelper.JSONStrToDate('keinDatum') = 0);
 end;
@@ -331,7 +340,7 @@ begin
     CheckEqualsInt('linePrice vorhanden',1,res.prices.linePrice.Count);
     if res.prices.linePrice.Count > 0 then
       CheckEquals('descriptiion aus der Spec','Zeile 1',res.prices.linePrice[0].description);
-    CheckEquals('reachData','01.01.2026',DateToStr(res.logistics.reachDate));
+    CheckEquals('reachData','2026-01-01',AsIsoDate(res.logistics.reachDate));
   finally
     res.Free;
   end;
@@ -454,9 +463,9 @@ begin
   end;
   try
     CheckEqualsInt('status',951,res.status);
-    CheckEquals('noOrderBefore','01.01.2026',DateToStr(res.basic.noOrderBefore));
-    CheckEquals('noDeliveryBefore','01.02.2026',DateToStr(res.basic.noDeliveryBefore));
-    CheckEquals('noMarketingBefore','01.03.2026',DateToStr(res.basic.noMarketingBefore));
+    CheckEquals('noOrderBefore','2026-01-01',AsIsoDate(res.basic.noOrderBefore));
+    CheckEquals('noDeliveryBefore','2026-02-01',AsIsoDate(res.basic.noDeliveryBefore));
+    CheckEquals('noMarketingBefore','2026-03-01',AsIsoDate(res.basic.noMarketingBefore));
     CheckEquals('sparepartsystemURL','https://x/ersatzteile',res.basic.sparepartsystemURL);
     CheckEquals('sparepartsystemdescription','Ersatzteilportal',res.basic.sparepartsystemdescription);
     CheckEquals('accessorieGroupIdManufacturer','ZG7',res.additional.accessorieGroupIdManufacturer);
@@ -474,8 +483,8 @@ begin
     if res.prices.promotionalPrice.Count = 1 then
     begin
       CheckEquals('Aktionspreis Wert','7.50',res.prices.promotionalPrice[0].value);
-      CheckEquals('Aktionspreis ab','01.04.2026',DateToStr(res.prices.promotionalPrice[0].startOfValidity));
-      CheckEquals('Aktionspreis bis','30.04.2026',DateToStr(res.prices.promotionalPrice[0].endOfValidity));
+      CheckEquals('Aktionspreis ab','2026-04-01',AsIsoDate(res.prices.promotionalPrice[0].startOfValidity));
+      CheckEquals('Aktionspreis bis','2026-04-30',AsIsoDate(res.prices.promotionalPrice[0].endOfValidity));
     end;
   finally
     res.Free;
@@ -713,7 +722,8 @@ begin
       '"followupProduct":[{"supplierPid":"E1"}]},'+
       '"logistics":{"countryOfOrigin":"DE","measureA":{"measure":"5"},'+
       '"weight":{"weight":"1.5"},"packagingUnits":[{"packagingType":"CT"}]},'+
-      '"prices":{"listPrice":[{"value":"10.00"},{"value":"9.00"}],'+
+      '"prices":{"rrp":{"value":"19.99","currency":"EUR"},'+
+      '"listPrice":[{"value":"10.00"},{"value":"9.00"}],'+
       '"netPrice":{"value":"8.00"},"rawMaterial":[{"material":"CU"}],'+
       '"linePrice":[{"value":"1.00"}],'+
       '"promotionalPrice":[{"value":"7.00","startOfValidity":"2026-04-01"}]},'+
@@ -729,6 +739,8 @@ begin
     CheckEquals('matchcode zurueckgesetzt','',res.basic.matchcode);
     Check('noOrderBefore zurueckgesetzt',res.basic.noOrderBefore = 0);
     CheckEquals('basic.rrp zurueckgesetzt','',res.basic.rrp.value);
+    CheckEquals('prices.rrp zurueckgesetzt','',res.prices.rrp.value);
+    CheckEquals('prices.rrp.currency zurueckgesetzt','',res.prices.rrp.currency);
     CheckEquals('productDescr zurueckgesetzt','',res.descriptions.productDescr);
     CheckEquals('shorttext1 zurueckgesetzt','',res.descriptions.shorttext1);
     CheckEquals('deepLink zurueckgesetzt','',res.additional.deepLink);
@@ -860,6 +872,194 @@ begin
   end;
 end;
 
+//Die Maskierung muss in beide Richtungen stimmen: zu wenig maskieren ist
+//gefaehrlich, zu viel zerstoert die Anzeige. Beide Tests sind deshalb positiv
+//formuliert, nicht als blosse Abwesenheitspruefung.
+procedure TestSanitizerEscaping;
+var
+  html : String;
+
+  function RenderDescr(const _Descr : String) : String;
+  var
+    r : TOpenMasterdataAPI_Result;
+    e : String;
+  begin
+    Result := '';
+    r := Parse('{"descriptions":{"productDescr":'+_Descr+'}}',e);
+    if r = nil then
+    begin
+      Check('Beschreibung parsebar',false,e);
+      exit;
+    end;
+    try
+      Result := TOpenMasterdataAPI_ViewHelper.AsHtml(r);
+    finally
+      r.Free;
+    end;
+  end;
+
+begin
+  Writeln('Sanitizer: Maskierung in beide Richtungen');
+
+  //Ein rohes Und muss maskiert werden, ein bereits maskiertes nicht doppelt
+  html := RenderDescr('"<p>Rohr & Fitting, Stahl &amp; Eisen</p>"');
+  Check('rohes Und wird maskiert',ContainsText(html,'Rohr &amp; Fitting'),html);
+  Check('Entity bleibt einfach maskiert',ContainsText(html,'Stahl &amp; Eisen'),html);
+
+  //Dasselbe im Klartextpfad, also ohne jedes Tag
+  html := RenderDescr('"Anschluss &szlig; und &ouml; sowie A & B"');
+  Check('Entity im Klartext bleibt erhalten',ContainsText(html,'&szlig;'),html);
+  Check('Entity im Klartext nicht doppelt maskiert',not ContainsText(html,'&amp;szlig;'),html);
+  Check('rohes Und im Klartext wird maskiert',ContainsText(html,'A &amp; B'),html);
+
+  //Das Kleiner-Zeichen selbst muss als Entity ankommen, nicht nur der Folgetext
+  html := RenderDescr('"<p>Druck < 3 bar und Temperatur > 5 Grad, Ende</p>"');
+  Check('kleiner-Zeichen bleibt als Entity',ContainsText(html,'Druck &lt; 3 bar'),html);
+  Check('groesser-Zeichen bleibt als Entity',ContainsText(html,'&gt; 5 Grad'),html);
+  Check('Text am Ende bleibt erhalten',ContainsText(html,'Ende'),html);
+
+  //Ein groesser-Zeichen im Attributwert darf das Tag nicht vorzeitig beenden
+  html := RenderDescr('"<p title=\"a>b\">Text</p>"');
+  Check('Attributwert mit groesser-Zeichen beendet Tag nicht',
+    ContainsText(html,'<p>Text</p>'),html);
+  html := RenderDescr('"<p>A</p><img src=\">\" onerror=\"alert(1)\">B"');
+  Check('kein Attributrest im Text',not ContainsText(html,'onerror'),html);
+
+  //Ein Nullzeichen wuerde die Anzeige abschneiden
+  html := RenderDescr('"<p>vor'+#0+'nach</p>"');
+  Check('Text nach dem Nullzeichen bleibt erhalten',ContainsText(html,'nach'),html);
+end;
+
+//Die Laufzeit muss linear bleiben. Eine fehlerhafte Antwort darf die Anzeige
+//nicht minutenlang blockieren.
+procedure TestSanitizerPerformance;
+var
+  res : TOpenMasterdataAPI_Result;
+  builder : TStringBuilder;
+  payload,html : String;
+  startTicks : TDateTime;
+  elapsedMs : Int64;
+  i : Integer;
+begin
+  Writeln('Sanitizer: Laufzeit bei entarteter Eingabe');
+
+  builder := TStringBuilder.Create;
+  try
+    //Kein einziges schliessendes Groesserzeichen: der Worst Case
+    for i := 1 to 100000 do
+      builder.Append('<a');
+    payload := builder.ToString;
+  finally
+    builder.Free;
+  end;
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    res.descriptions.productDescr := payload;
+    startTicks := Now;
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    elapsedMs := MilliSecondsBetween(Now,startTicks);
+    Check('200000 Zeichen in unter 2 Sekunden',elapsedMs < 2000,
+      IntToStr(elapsedMs)+' ms');
+    Check('Ausgabe nicht leer',html <> '');
+  finally
+    res.Free;
+  end;
+end;
+
+//Zahlfelder: dezimal geschriebene Ganzzahlen zaehlen, echte Kommawerte nicht.
+procedure TestIntegerParsing;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Zahlfelder aus Dezimalschreibweise');
+
+  res := Parse('{"documents":[{"url":"http://x/1.pdf","size":"1024.0","sortOrder":"2.0"}]}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    CheckEqualsInt('size aus Dezimalschreibweise',1024,res.documents[0].size);
+    CheckEqualsInt('sortOrder aus Dezimalschreibweise',2,res.documents[0].sortOrder);
+  finally
+    res.Free;
+  end;
+
+  //Ein echter Kommawert ist fachlich unzulaessig und wird nicht gerundet
+  res := Parse('{"documents":[{"url":"http://x/2.pdf","size":"1024.6"}]}',err);
+  if res <> nil then
+  try
+    CheckEqualsInt('Kommawert wird nicht gerundet',0,res.documents[0].size);
+  finally
+    res.Free;
+  end
+  else
+    Check('Antwort parsebar',false,err);
+end;
+
+//Die Obergrenzen der Wiederholungsstrategie.
+procedure TestRetryPolicyLimits;
+var
+  retries,delaySeconds : Integer;
+begin
+  Writeln('Grenzen der Wiederholungsstrategie');
+
+  retries := 40; delaySeconds := 100000;
+  TOpenMasterdataApiClient.ClampRetryPolicy(retries,delaySeconds);
+  CheckEqualsInt('Wiederholungen gedeckelt',10,retries);
+  CheckEqualsInt('Wartezeit gedeckelt',300,delaySeconds);
+
+  retries := -1; delaySeconds := -1;
+  TOpenMasterdataApiClient.ClampRetryPolicy(retries,delaySeconds);
+  CheckEqualsInt('negative Wiederholungen auf 0',0,retries);
+  CheckEqualsInt('negative Wartezeit auf 0',0,delaySeconds);
+
+  retries := 2; delaySeconds := 10;
+  TOpenMasterdataApiClient.ClampRetryPolicy(retries,delaySeconds);
+  CheckEqualsInt('Standardwert unveraendert',2,retries);
+  CheckEqualsInt('Standardwartezeit unveraendert',10,delaySeconds);
+end;
+
+//Die Ursprungspruefung entscheidet, ob ein Zugriffstoken mitgesendet werden
+//darf. Ein Praefixvergleich waere hier eine Luecke.
+procedure TestSameOrigin;
+
+  function Origin(const _Uri : String) : Boolean;
+  begin
+    Result := TOpenMasterdataApiClient.IsSameOrigin(_Uri,'https','api.example.org',443);
+  end;
+
+begin
+  Writeln('Ursprungspruefung');
+
+  Check('gleicher Ursprung',Origin('https://api.example.org/v1/artikel'));
+  Check('Standardport ausgeschrieben',Origin('https://api.example.org:443/v1/artikel'));
+  Check('Grossschreibung im Host',Origin('https://API.EXAMPLE.ORG/v1/artikel'));
+
+  //Genau der Angriff, gegen den die Pruefung gerichtet ist
+  Check('Host nur als Praefix wird abgelehnt',
+    not Origin('https://api.example.org.angreifer.tld/logo.png'));
+  Check('Host mit Bindestrich-Anhang wird abgelehnt',
+    not Origin('https://api.example.org-angreifer.tld/logo.png'));
+  Check('eingebettete Zugangsdaten werden abgelehnt',
+    not Origin('https://api.example.org@angreifer.tld/logo.png'));
+
+  Check('abweichender Port wird abgelehnt',not Origin('https://api.example.org:8443/v1'));
+  Check('abweichendes Schema wird abgelehnt',not Origin('http://api.example.org/v1'));
+  Check('fremder Host wird abgelehnt',not Origin('https://angreifer.tld/v1'));
+
+  //Formen, die kein Ursprung sind
+  Check('data-Adresse wird abgelehnt',not Origin('data:text/html,<b>x</b>'));
+  Check('relativer Pfad wird abgelehnt',not Origin('/v1/artikel'));
+  Check('leere Adresse wird abgelehnt',not Origin(''));
+  Check('unlesbare Adresse wird abgelehnt',not Origin('kein uri'));
+
+  //Ohne konfigurierten Host darf nie zugestimmt werden
+  Check('ohne Host kein Ursprung',
+    not TOpenMasterdataApiClient.IsSameOrigin('https://api.example.org/v1','https','',443));
+end;
+
 //Smoketest gegen die echten Lieferanten-Antworten, sofern vorhanden.
 procedure TestRealResponses(const _Folder : String);
 var
@@ -962,6 +1162,16 @@ begin
     TestReloadResetsEverything;
     Writeln;
     TestEnumRoundTrip;
+    Writeln;
+    TestSanitizerEscaping;
+    Writeln;
+    TestSanitizerPerformance;
+    Writeln;
+    TestIntegerParsing;
+    Writeln;
+    TestRetryPolicyLimits;
+    Writeln;
+    TestSameOrigin;
     Writeln;
 
     if ParamCount > 0 then
