@@ -800,9 +800,11 @@ begin
     if FClientID <> '' then
       RESTRequest.Params.AddItem('client_id',FClientID);
 
-    //Benutzerdaten gehoeren nur zum Resource-Owner-Password-Flow.
-    //Beim Client-Credentials-Flow weisen strikte Server sie mit 400 zurueck.
-    if FGrantType = omdgt_Password then
+    //Zugangsdaten werden gesendet, sobald welche konfiguriert sind. Der
+    //Grant-Type taugt dafuer nicht als Kriterium: die GC-Gruppe fuehrt
+    //client_credentials und verlangt trotzdem username und password, sonst
+    //antwortet der Server mit 400 und "make sure to supply password".
+    if (FUsername <> '') or (FCustomerNumber <> '') or (FPassword <> '') then
     begin
       if (FUsername <> '') and (FCustomerNumber <> '') then
         RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
