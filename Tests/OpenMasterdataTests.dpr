@@ -73,6 +73,11 @@ begin
   Check(_Name,_Expected = _Actual,'erwartet '+IntToStr(_Expected)+', war '+IntToStr(_Actual));
 end;
 
+procedure CheckEqualsStr(const _Name, _Expected, _Actual : String);
+begin
+  Check(_Name,_Expected = _Actual,'erwartet "'+_Expected+'", war "'+_Actual+'"');
+end;
+
 //Datum in fester Schreibweise, damit die Tests unabhaengig von den
 //Regionseinstellungen des Rechners sind.
 function AsIsoDate(_Value : TDateTime) : String;
@@ -1028,6 +1033,117 @@ end;
 //Die Auswahl der Datenpakete kommt aus der Konfiguration. Ein Tippfehler darf
 //nicht dazu fuehren, dass stillschweigend nichts oder etwas Falsches abgefragt
 //wird.
+//Die Paketnamen gehen als Query-Parameter an den Server. Sie und der Trenner
+//sind Drahtformat: gegen Literale geprueft, nicht gegen die Funktion selbst.
+procedure TestDataPackageWireFormat;
+begin
+  Writeln('Datenpakete: Drahtformat');
+
+  CheckEqualsStr('basic','basic',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_basic));
+  CheckEqualsStr('additional','additional',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_additional));
+  CheckEqualsStr('prices','prices',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_prices));
+  CheckEqualsStr('descriptions','descriptions',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_descriptions));
+  CheckEqualsStr('logistics','logistics',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_logistics));
+  CheckEqualsStr('sparepartlists','sparepartlists',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_sparepartlists));
+  CheckEqualsStr('pictures','pictures',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_pictures));
+  CheckEqualsStr('documents','documents',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_documents));
+
+  //Der Trenner ist der URL-kodierte senkrechte Strich. Er geht mit
+  //poDoNotEncode hinaus, ein anderer Wert waere ein anderer Aufruf.
+  CheckEqualsStr('Trenner der Paketliste','basic%7Cprices',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
+      [omd_datapackage_basic,omd_datapackage_prices]));
+
+  //Die Vorgabemenge steht fuer die vollstaendige Abfrage. Gegen eine
+  //aufgezaehlte Erwartung geprueft, sonst bliebe ein fehlendes Paket unbemerkt.
+  CheckEqualsStr('vollstaendige Paketliste',
+    'basic%7Cadditional%7Cprices%7Cdescriptions%7Clogistics%7Csparepartlists'+
+    '%7Cpictures%7Cdocuments',
+    TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
+      TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES));
+end;
+
+//Eine Fehlermeldung wird protokolliert und weitergereicht. Sie darf kein
+//Geheimnis enthalten, nicht beliebig lang werden und keine Steuerzeichen
+//durchlassen.
+procedure TestErrorMessageHygiene;
+var
+  msg : String;
+
+  function Describe(const _Content : String) : String;
+  begin
+    Result := TOpenMasterdataApiClient.DescribeOAuthFailure(_Content);
+  end;
+
+begin
+  Writeln('Fehlermeldungen: Hygiene');
+
+  //Antwortet der Server mit 200, aber ohne access_token, stehen die uebrigen
+  //Token trotzdem im Koerper. Genannt werden duerfen nur die Feldnamen.
+  msg := Describe('{"refresh_token":"RT-GEHEIM-abc123","token_type":"Bearer","expires_in":300}');
+  Check('Refresh-Token erscheint nicht',not ContainsText(msg,'RT-GEHEIM'),msg);
+  Check('Feldname wird genannt',ContainsText(msg,'refresh_token'),msg);
+  Check('weiterer Feldname wird genannt',ContainsText(msg,'expires_in'),msg);
+
+  //Auch ein anders geschriebenes Tokenfeld darf nicht durchrutschen
+  msg := Describe('{"accessToken":"AT-GEHEIM-xyz789"}');
+  Check('camelCase-Token erscheint nicht',not ContainsText(msg,'AT-GEHEIM'),msg);
+
+  //Abgeschnittene Antwort, kein gueltiges JSON, aber mit Token
+  msg := Describe('{"access_token":"AT-GEHEIM-truncated');
+  Check('Token in unlesbarer Antwort erscheint nicht',
+    not ContainsText(msg,'AT-GEHEIM'),msg);
+  Check('Laenge wird stattdessen genannt',ContainsText(msg,'Zeichen'),msg);
+
+  //Eine harmlose Antwort bleibt lesbar
+  msg := Describe('Service unavailable, please try later');
+  Check('harmlose Antwort bleibt sichtbar',ContainsText(msg,'Service unavailable'),msg);
+
+  //Ein geschwaetziger Server darf die Meldung nicht aufblaehen
+  msg := Describe('{"error":"e","error_description":"'+StringOfChar('D',5000)+'"}');
+  Check('lange Beschreibung wird gekappt',Length(msg) < 400,IntToStr(Length(msg))+' Zeichen');
+  Check('Anfang der Beschreibung bleibt erhalten',ContainsText(msg,'DDDD'),msg);
+
+  //Steuerzeichen wuerden Protokolle unlesbar machen oder Eintraege vortaeuschen
+  msg := Describe('{"error":"e","error_description":"a'#9'b'#0'c'#27'[31md"}');
+  Check('kein Tabulator in der Meldung',Pos(#9,msg) = 0);
+  Check('kein Nullzeichen in der Meldung',Pos(#0,msg) = 0);
+  Check('keine Terminalsequenz in der Meldung',Pos(#27,msg) = 0);
+  Check('Text bleibt trotzdem lesbar',ContainsText(msg,'a b c'),msg);
+
+  //Ein kleiner-Zeichen mitten im Text ist kein Markup. Wird es als solches
+  //behandelt, verschwindet der gesamte Rest, also genau die Beschreibung,
+  //derentwegen der Antwortkoerper ueberhaupt gemeldet wird.
+  msg := Describe('Serverfehler: value < 10 required, Feld menge');
+  Check('Text nach dem kleiner-Zeichen bleibt erhalten',ContainsText(msg,'Feld menge'),msg);
+  Check('Text vor dem kleiner-Zeichen bleibt erhalten',ContainsText(msg,'Serverfehler'),msg);
+
+  //Gueltiges JSON ohne Fehlerfeld: Feldnamen ja, Werte nein
+  msg := Describe('{"hint":"beliebiger Wert","more":"ebenso"}');
+  Check('Feldnamen bleiben sichtbar',ContainsText(msg,'hint'),msg);
+  Check('Werte werden nicht ausgegeben',not ContainsText(msg,'beliebiger Wert'),msg);
+
+  //Eine echte HTML-Seite wird dagegen entkleidet
+  msg := Describe('<html><body><h1>Wartung</h1></body></html>');
+  Check('HTML wird gemeldet',ContainsText(msg,'HTML'),msg);
+  Check('Text der Seite bleibt lesbar',ContainsText(msg,'Wartung'),msg);
+  Check('kein Markup in der Meldung',Pos('<h1>',msg) = 0,msg);
+
+  //Vertauschte Felder wuerden die Meldung verdrehen
+  msg := Describe('{"error":"invalid_grant","error_description":"Bad credentials"}');
+  Check('Code steht in Klammern',ContainsText(msg,'(invalid_grant)'),msg);
+  Check('Beschreibung folgt nach dem Doppelpunkt',
+    Pos('invalid_grant',msg) < Pos('Bad credentials',msg),msg);
+end;
+
 procedure TestDataPackagesFromString;
 var
   packages : TOpenMasterdataAPI_DataPackages;
@@ -1045,11 +1161,21 @@ begin
 
   unknownNames := TStringList.Create;
   try
-    //Ohne Angabe gilt die Vorgabe
-    Check('leere Angabe ergibt die Vorgabe',
-      Parse('') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
-    Check('nur Leerzeichen ergibt die Vorgabe',
+    //Ohne Angabe gilt die Vorgabe. Aufgezaehlt statt gegen dieselbe Konstante
+    //geprueft, sonst bliebe ein fehlendes Paket in ALL_DATAPACKAGES unbemerkt.
+    Check('leere Angabe ergibt alle Pakete',
+      Parse('') = [omd_datapackage_basic,omd_datapackage_additional,
+                   omd_datapackage_prices,omd_datapackage_descriptions,
+                   omd_datapackage_logistics,omd_datapackage_sparepartlists,
+                   omd_datapackage_pictures,omd_datapackage_documents]);
+    Check('nur Leerzeichen ergibt alle Pakete',
       Parse('   ') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+
+    //Die Vorgabe wird auch wirklich uebernommen, nicht bloss ALL_DATAPACKAGES
+    unknownNames.Clear;
+    Check('uebergebene Vorgabe gilt',
+      TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString('',
+        [omd_datapackage_prices],unknownNames) = [omd_datapackage_prices]);
 
     //Genau die genannten Pakete, nicht mehr
     packages := Parse('basic,prices');
@@ -1084,6 +1210,28 @@ begin
 
     //Doppelnennung ist harmlos
     Check('Doppelnennung aendert nichts',Parse('basic,basic') = Parse('basic'));
+
+    //Ein unbekannter Name mehrfach genannt ergibt einen Eintrag, nicht drei
+    unknownNames.Clear;
+    Parse('foo,foo,foo');
+    CheckEqualsInt('unbekannter Name nur einmal gemeldet',1,unknownNames.Count);
+
+    //Eine Angabe aus lauter Trennern waere sonst wortlos in der Vorgabe
+    //verschwunden
+    unknownNames.Clear;
+    Check('reine Trennerfolge ergibt die Vorgabe',
+      Parse(',,;; ||') = TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+    Check('reine Trennerfolge wird gemeldet',unknownNames.Count > 0,
+      unknownNames.CommaText);
+
+    //Tabulator und Zeilenumbruch trennen ebenfalls
+    Check('Tabulator trennt',Parse('basic'#9'prices') = Parse('basic,prices'));
+    Check('Zeilenumbruch trennt',Parse('basic'#13#10'prices') = Parse('basic,prices'));
+
+    //Ohne Liste fuer unbekannte Namen darf nichts schiefgehen
+    Check('ohne Liste fuer unbekannte Namen',
+      TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString('basic,foo',
+        TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES) = [omd_datapackage_basic]);
 
     //Jeder Paketname der Spec muss lesbar sein
     for package := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do
@@ -1305,6 +1453,10 @@ begin
     TestOAuthFailureMessage;
     Writeln;
     TestDataPackagesFromString;
+    Writeln;
+    TestDataPackageWireFormat;
+    Writeln;
+    TestErrorMessageHygiene;
     Writeln;
 
     if ParamCount > 0 then

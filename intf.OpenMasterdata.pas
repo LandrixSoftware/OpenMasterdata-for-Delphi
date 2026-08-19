@@ -27,7 +27,7 @@ unit intf.OpenMasterdata;
 interface
 
 uses
-  System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils
+  System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils,System.StrUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
   ,System.NetEncoding,System.Net.HttpClient,System.Net.URLClient
   ,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
@@ -183,11 +183,11 @@ type
       _ClientSecret, _ClientScope : String; _GrantType : TGrantType;
       _DataPackagesSendMode : TDataPackagesSendMode);
     procedure SetRetryPolicy(_MaxRetries, _MaxDelaySeconds : Integer);
-    //Entscheidet, ob ein Status wiederholt wird und wie lange vorher zu warten
-    //ist. Als reine Funktion ausgelegt, damit sie sich testen laesst.
     //Beschreibt, warum eine OAuth-Antwort keinen Token enthaelt. Oeffentlich,
     //damit die Meldung ohne Server geprueft werden kann.
     class function DescribeOAuthFailure(const _Content : String) : String;
+    //Entscheidet, ob ein Status wiederholt wird und wie lange vorher zu warten
+    //ist. Als reine Funktion ausgelegt, damit sie sich testen laesst.
     class function TryGetRetryDelay(_StatusCode, _Attempt, _MaxRetries, _MaxDelaySeconds : Integer;
       const _RetryAfterHeader : String; out _DelayMilliseconds : Integer) : Boolean; static;
     //Begrenzt die Werte einer Wiederholungsstrategie auf den zulaessigen
@@ -223,45 +223,131 @@ var
   openConnectionsCS : TCriticalSection;
   openConnectionsInitLock : TObject;
 
+//Macht eine Servermeldung protokolltauglich: eine Zeile, keine Steuerzeichen.
+//Ein #0 schneidet die Zeile bei vielen Lesern ab, mit ESC lassen sich ueber
+//Terminalsequenzen fremde Protokolleintraege vortaeuschen.
 function NormalizeSingleLine(const _Value : String) : String;
+var
+  builder : TStringBuilder;
+  i : Integer;
 begin
-  Result := Trim(_Value);
-  Result := StringReplace(Result,#13#10,' ',[rfReplaceAll]);
-  Result := StringReplace(Result,#13,' ',[rfReplaceAll]);
-  Result := StringReplace(Result,#10,' ',[rfReplaceAll]);
+  builder := TStringBuilder.Create;
+  try
+    for i := 1 to Length(_Value) do
+      if _Value[i] < #32 then
+        builder.Append(' ')
+      else
+        builder.Append(_Value[i]);
+    Result := builder.ToString;
+  finally
+    builder.Free;
+  end;
   while Pos('  ',Result) > 0 do
     Result := StringReplace(Result,'  ',' ',[rfReplaceAll]);
+  Result := Trim(Result);
+end;
+
+//Kuerzt einen Text auf ein fuer eine Fehlermeldung vertraegliches Mass.
+function ShortenForMessage(const _Value : String; _MaxLength : Integer = 240) : String;
+begin
+  Result := _Value;
+  if Length(Result) > _MaxLength then
+    Result := Copy(Result,1,_MaxLength) + '...';
+end;
+
+function LooksLikeHtml(const _Content : String) : Boolean;
+var
+  trimmedContent : String;
+begin
+  trimmedContent := TrimLeft(_Content);
+  Result := (trimmedContent <> '') and (trimmedContent[1] = '<');
 end;
 
 function StripHtmlTags(const _Value : String) : String;
 var
   inTag : Boolean;
   i : Integer;
+  builder : TStringBuilder;
 begin
-  Result := '';
-  inTag := false;
-  for i := 1 to Length(_Value) do
-  begin
-    case _Value[i] of
-      '<' : inTag := true;
-      '>' : inTag := false;
-    else
-      if not inTag then
-        Result := Result + _Value[i];
+  builder := TStringBuilder.Create;
+  try
+    inTag := false;
+    for i := 1 to Length(_Value) do
+    begin
+      case _Value[i] of
+        '<' : inTag := true;
+        '>' : inTag := false;
+      else
+        if not inTag then
+          builder.Append(_Value[i]);
+      end;
     end;
+    Result := NormalizeSingleLine(builder.ToString);
+  finally
+    builder.Free;
   end;
-  Result := NormalizeSingleLine(Result);
 end;
 
-//Bereitet einen Antwortkoerper fuer eine Fehlermeldung auf: ohne Markup,
-//einzeilig und gekuerzt.
+//Bereitet einen Antwortkoerper fuer eine Fehlermeldung auf. Markup wird nur
+//entfernt, wenn die Antwort wirklich HTML ist. Sonst wuerde ein einzelnes <
+//in einer Meldung wie {"hint":"value < 10 required"} den gesamten Rest
+//verschlucken, also genau die Beschreibung, derentwegen der Koerper
+//ueberhaupt angehaengt wird.
 function ResponsePreview(const _Content : String) : String;
 begin
-  Result := StripHtmlTags(_Content);
-  if Result = '' then
+  if LooksLikeHtml(_Content) then
+    Result := StripHtmlTags(_Content)
+  else
     Result := NormalizeSingleLine(_Content);
-  if Length(Result) > 240 then
-    Result := Copy(Result,1,240) + '...';
+  Result := ShortenForMessage(Result);
+end;
+
+//Erkennt Antworten, die ein Geheimnis enthalten koennen. Eine Token-Antwort
+//fuehrt Zugriffs- und Refresh-Token im Klartext; manche Server spiegeln auch
+//den Authorization-Header. Solche Koerper duerfen nicht in eine Meldung
+//geraten, die protokolliert oder an den Anwender weitergereicht wird.
+function MayContainSecret(const _Content : String) : Boolean;
+const
+  CSecretMarkers : array[0..5] of String =
+    ('access_token','refresh_token','id_token','client_secret','authorization','password');
+var
+  marker : String;
+begin
+  Result := false;
+  for marker in CSecretMarkers do
+    if ContainsText(_Content,marker) then
+      exit(true);
+end;
+
+//Wie ResponsePreview, unterdrueckt aber Koerper, die ein Geheimnis enthalten
+//koennen. Die Laengenangabe genuegt zur Einordnung; den vollstaendigen Text
+//liefert GetLastOAuthResponseContent, das ausdruecklich als heikel
+//gekennzeichnet ist.
+function SafeResponsePreview(const _Content : String) : String;
+begin
+  if MayContainSecret(_Content) then
+    Result := '['+IntToStr(Length(_Content))+
+              ' Zeichen, wegen moeglicher Zugangsdaten nicht ausgegeben]'
+  else
+    Result := ResponsePreview(_Content);
+end;
+
+//Nennt die Feldnamen einer JSON-Antwort, aber keinen einzigen Wert. Damit
+//laesst sich erkennen, wie der Server geantwortet hat, ohne ein Token
+//preiszugeben.
+function JsonFieldNames(_Object : TJSONObject) : String;
+var
+  pair : TJSONPair;
+begin
+  Result := '';
+  for pair in _Object do
+  begin
+    if Result <> '' then
+      Result := Result+', ';
+    Result := Result+pair.JsonString.Value;
+  end;
+  if Result = '' then
+    Result := 'keine';
 end;
 
 //Ein Token-Endpunkt kann mit gueltigem JSON antworten und trotzdem keinen
@@ -275,7 +361,7 @@ var
   detail : String;
 begin
   Result := _Message;
-  detail := ResponsePreview(_Content);
+  detail := SafeResponsePreview(_Content);
   if detail = '' then
     exit;
   //Nicht wiederholen, was schon in der Meldung steht
@@ -295,7 +381,7 @@ begin
     exit('OAuth response is empty.');
 
   if trimmedContent[1] = '<' then
-    exit('OAuth response is HTML instead of JSON: ' + ResponsePreview(trimmedContent));
+    exit('OAuth response is HTML instead of JSON: ' + SafeResponsePreview(trimmedContent));
 
   try
     jsonValue := TJSONObject.ParseJSONValue(trimmedContent);
@@ -321,18 +407,22 @@ begin
         if errorCode <> '' then
           Result := Result + ' (' + errorCode + ')';
         if errorDescr <> '' then
-          Result := Result + ': ' + NormalizeSingleLine(errorDescr);
+          //Auch dieser Text kommt vom Server und kann beliebig lang sein
+          Result := Result + ': ' + ShortenForMessage(NormalizeSingleLine(errorDescr));
         exit;
       end;
 
-      //Gueltiges JSON, aber ohne Token und ohne Fehlerfeld
-      exit('OAuth response contains no access_token: ' + ResponsePreview(trimmedContent));
+      //Gueltiges JSON, aber ohne Token und ohne Fehlerfeld. Ausgegeben werden
+      //nur die Feldnamen: der Koerper fuehrt in diesem Fall haeufig ein
+      //Refresh-Token, das nicht in eine Meldung gehoert.
+      exit('OAuth response contains no access_token. Felder: ' +
+           JsonFieldNames(TJSONObject(jsonValue)));
     end;
   finally
     jsonValue.Free;
   end;
 
-  Result := 'OAuth response is not valid JSON: ' + ResponsePreview(trimmedContent);
+  Result := 'OAuth response is not valid JSON: ' + SafeResponsePreview(trimmedContent);
 end;
 
 function TryLoadAuthResult(const _Content : String; out _AuthResult : TOpenMasterdataAPI_AuthResult;
@@ -613,8 +703,6 @@ begin
   end;
 end;
 
-//Wiederholt werden nur Antworten, die eine voruebergehende Ueberlast anzeigen.
-//Alle uebrigen 4xx wuerden beim zweiten Versuch genauso beantwortet.
 class function TOpenMasterdataApiClient.DescribeOAuthFailure(
   const _Content: String): String;
 begin
@@ -831,7 +919,7 @@ var
   RESTRequest: TRESTRequest;
 
   itm : TOpenMasterdataAPI_AuthResult;
-  authError : String;
+  authError,loginName : String;
 begin
   //https://github.com/paolo-rossi/delphi-neon
   Result := false;
@@ -872,17 +960,21 @@ begin
     //Grant-Type taugt dafuer nicht als Kriterium: die GC-Gruppe fuehrt
     //client_credentials und verlangt trotzdem username und password, sonst
     //antwortet der Server mit 400 und "make sure to supply password".
-    if (FUsername <> '') or (FCustomerNumber <> '') or (FPassword <> '') then
-    begin
-      if (FUsername <> '') and (FCustomerNumber <> '') then
-        RESTRequest.Params.AddItem('username',FUsername+#9+FCustomerNumber)
-      else
-      if (FCustomerNumber <> '') then
-        RESTRequest.Params.AddItem('username',FCustomerNumber)
-      else
-        RESTRequest.Params.AddItem('username',FUsername);
+    //Verlangt der Lieferant die Kundennummer, gehoert sie mit Tabulator
+    //getrennt an den Benutzernamen. Leere Felder werden nicht gesendet:
+    //strikte Server weisen ein leeres password mit 400 zurueck.
+    if (FUsername <> '') and (FCustomerNumber <> '') then
+      loginName := FUsername+#9+FCustomerNumber
+    else
+    if FCustomerNumber <> '' then
+      loginName := FCustomerNumber
+    else
+      loginName := FUsername;
+
+    if loginName <> '' then
+      RESTRequest.Params.AddItem('username',loginName);
+    if FPassword <> '' then
       RESTRequest.Params.AddItem('password',FPassword);
-    end;
 
     RESTRequest.Response := RESTResponse;
 
@@ -891,7 +983,11 @@ begin
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
-      FLastErrorMessage := RESTResponse.StatusText+' '+RESTResponse.Content;
+      //RFC 6749 Abschnitt 5.2 laesst Fehler mit Status 400 beantworten, das ist
+      //der Regelfall. Ohne diese Auswertung stuende hier der rohe Koerper samt
+      //allem, was der Server hineinschreibt.
+      FLastErrorMessage := Trim(RESTResponse.StatusText+' '+
+                                OAuthJsonErrorMessage(RESTResponse.Content));
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
@@ -971,7 +1067,11 @@ begin
 
     if not RESTResponse.Status.SuccessOK_200 then
     begin
-      FLastErrorMessage := RESTResponse.StatusText+' '+RESTResponse.Content;
+      //RFC 6749 Abschnitt 5.2 laesst Fehler mit Status 400 beantworten, das ist
+      //der Regelfall. Ohne diese Auswertung stuende hier der rohe Koerper samt
+      //allem, was der Server hineinschreibt.
+      FLastErrorMessage := Trim(RESTResponse.StatusText+' '+
+                                OAuthJsonErrorMessage(RESTResponse.Content));
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;

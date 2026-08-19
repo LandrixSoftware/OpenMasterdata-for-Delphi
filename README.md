@@ -105,9 +105,11 @@ run-logintest.bat Sonepar cc     zusätzlich den Grant-Type übersteuern
 
 Der zweite Parameter (`pw` oder `cc`) hilft bei der Eingrenzung, wenn ein Endpunkt den konfigurierten Grant-Type ablehnt. Der Rückgabewert ist 0, wenn sich alle geprüften Zugänge anmelden konnten und einen Artikel geliefert haben.
 
-Abgefragt werden alle Datenpakete auf einmal; die Antwort wird eingelesen und es wird gemeldet, welche Bereiche tatsächlich gefüllt sind. Scheitert dieser Abruf, sucht das Programm die Ursache: es probiert den jeweils anderen `DataPackageSendMode` und danach jedes Datenpaket einzeln. Damit lässt sich unterscheiden, ob ein Lieferant die Paketliste anders erwartet oder ob er ein bestimmtes Datenpaket nicht ausliefern kann.
+Abgefragt werden die für den Lieferanten konfigurierten Datenpakete in einem Aufruf; die Antwort wird eingelesen und es wird gemeldet, welche Bereiche tatsächlich gefüllt sind. Scheitert dieser Abruf, sucht das Programm die Ursache: es wiederholt zuerst denselben Aufruf unverändert — gelingt er dann, war die Störung vorübergehend —, probiert danach den jeweils anderen `DataPackageSendMode` und schließlich jedes Datenpaket einzeln. Damit lässt sich unterscheiden, ob ein Lieferant die Paketliste anders erwartet oder ob er ein bestimmtes Datenpaket nicht ausliefern kann.
 
-Welche Datenpakete abgefragt werden, steuert der optionale Schlüssel `DataPackages` je Lieferant, etwa `DataPackages=basic,descriptions,logistics,pictures,documents`. Fehlt er oder ist er leer, werden alle Pakete angefragt. Das hilft bei Lieferanten, die ein einzelnes Paket nicht ausliefern können und die gesamte Abfrage daran scheitern lassen. Nicht erkannte Namen werden gemeldet statt übergangen.
+Welche Datenpakete abgefragt werden, steuert der optionale Schlüssel `DataPackages` je Lieferant, etwa `DataPackages=basic,descriptions,logistics,pictures,documents`. Als Trenner gelten Komma, Semikolon, senkrechter Strich, Leerzeichen, Tabulator und Zeilenumbruch. Das hilft bei Lieferanten, die ein einzelnes Paket nicht ausliefern können und die gesamte Abfrage daran scheitern lassen.
+
+Fehlt der Schlüssel, ist er leer oder nennt er kein einziges bekanntes Paket, werden alle Pakete angefragt — eine leere Auswahl würde jede Abfrage scheitern lassen. Nicht erkannte Namen werden übergangen und zusätzlich gemeldet, damit ein Tippfehler nicht unbemerkt bleibt.
 
 Als Vorlage für die Konfiguration dient `Samples\configuration.sample.ini`. Die echte `configuration.ini` enthält Zugangsdaten und ist von der Versionsverwaltung ausgenommen.
 
@@ -131,7 +133,11 @@ Weitere Informationen unter
 
 # Lieferanten mit Open Masterdata-Unterstützung
 
-Die Spalten entsprechen den Schlüsseln in `configuration.ini`. `CustomerNumberRequired` entscheidet, ob die Kundennummer Teil der Anmeldung ist: Verlangt ein Lieferant sie, wird sie dem Benutzernamen angehängt — sonst muss sie beim Login außen vor bleiben, andernfalls weist der Server die Zugangsdaten zurück.
+Die Tabelle hält fest, was die Lieferanten in der Praxis erwarten. Die Spaltennamen entsprechen den Schlüsseln in `configuration.ini`, ausgewertet wird davon derzeit allein `CustomernumberRequired`; `ClientIDRequired`, `UsernameRequired` und `ClientSecretRequired` sind Notizen für die Einrichtung und werden vom Code nicht gelesen.
+
+`CustomernumberRequired` entscheidet, ob die Kundennummer Teil der Anmeldung ist. Verlangt ein Lieferant sie, wird sie mit einem Tabulator getrennt an den Benutzernamen gehängt; ist kein Benutzername gesetzt, geht sie allein als `username` hinaus. Verlangt er sie nicht, muss sie beim Login außen vor bleiben, sonst weist der Server die Zugangsdaten zurück. Fehlt der Schlüssel, wird eine eingetragene Kundennummer gesendet.
+
+In der Konfiguration sind `True`/`False` die üblichen Werte; `ja`/`nein` werden ebenfalls verstanden.
 
 | Lieferant | ClientIDRequired | GrantType | DataPackageSendMode | UsernameRequired | CustomerNumberRequired | ClientSecretRequired |
 |----------|----------|----------|----------|----------|----------|----------|

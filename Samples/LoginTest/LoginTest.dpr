@@ -80,11 +80,29 @@ end;
 //der Anmeldung erwartet. Verlangt er sie nicht, darf sie nicht mitgegeben
 //werden: die Bibliothek haengt sie sonst an den Benutzernamen an und der
 //Login schlaegt mit bad_credentials fehl.
+//Liest einen Ja-Nein-Schluessel. StrToBoolDef versteht nur True, False und
+//Zahlen; in Konfigurationen und in der Lieferantentabelle der Dokumentation
+//steht aber auch ja und nein. Ein nicht erkannter Wert wuerde stillschweigend
+//zur Vorgabe, was hier das Gegenteil des Gemeinten bedeuten kann.
+function ConfiguredFlag(_Ini : TMemIniFile; const _Section,_Key : String;
+  _Default : Boolean) : Boolean;
+var
+  configuredValue : String;
+begin
+  configuredValue := Trim(_Ini.ReadString(_Section,_Key,''));
+  if configuredValue = '' then
+    exit(_Default);
+  if MatchText(configuredValue,['true','ja','yes','y','j','1','-1']) then
+    exit(true);
+  if MatchText(configuredValue,['false','nein','no','n','0']) then
+    exit(false);
+  Result := _Default;
+end;
+
 function ConfiguredCustomerNumber(_Ini : TMemIniFile; const _Section : String) : String;
 begin
-  //ReadBool versteht nur 0 und 1, in der Konfiguration steht True bzw. False.
   //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
-  if not StrToBoolDef(Trim(_Ini.ReadString(_Section,'CustomernumberRequired','True')),true) then
+  if not ConfiguredFlag(_Ini,_Section,'CustomernumberRequired',true) then
     exit('');
   Result := _Ini.ReadString(_Section,'Customernumber','');
 end;
@@ -315,7 +333,7 @@ var
   client : IOpenMasterdataApiClient;
   res : TOpenMasterdataAPI_Result;
   sendMode : TOpenMasterdataDataPackagesSendMode;
-  dataReceived : Boolean;
+  dataReceived,loggedIn : Boolean;
   countLoginOk,countDataOk,countTotal : Integer;
 begin
   countTotal := 0;
@@ -344,7 +362,6 @@ begin
       if (ParamCount > 0) and not ContainsText(section,ParamStr(1)) then
         continue;
 
-      Inc(countTotal);
       Writeln('');
       Writeln('=== '+section);
 
@@ -362,6 +379,7 @@ begin
               ', Scope '+YesNo(ini.ReadString(section,'ClientScope','') <> ''));
       Writeln('  OAuthURL          : '+ini.ReadString(section,'OAuthURL',''));
 
+      unknownNames.Clear;
       Writeln('  Datenpakete       : '+
         StringReplace(TOpenMasterdataAPI_DataPackageHelper.DataPackagesAsString(
           ConfiguredDataPackages(ini,section,unknownNames)),'%7C',', ',[rfReplaceAll]));
@@ -372,9 +390,14 @@ begin
       artNo := FirstArtNo(ini.ReadString(section,'ArtNoAsCommatext',''));
       if artNo = '' then
       begin
+        //Ohne Artikelnummer laesst sich nichts pruefen. Der Zugang zaehlt dann
+        //auch nicht als Fehlschlag, sonst meldete das Programm einen Defekt,
+        //wo nur nichts zu tun war.
         Writeln('  ERGEBNIS          : uebersprungen, keine Artikelnummer hinterlegt');
         continue;
       end;
+
+      Inc(countTotal);
 
       client := CreateClient(ini,section,section,sendMode);
 
@@ -389,14 +412,21 @@ begin
       end;
 
       try
+        //Nicht der Token selbst zeigt die geglueckte Anmeldung an: nach einer
+        //Antwort mit 401 oder 403 verwirft die Bibliothek ihn wieder. Die
+        //Antwort des Token-Endpunkts bleibt dagegen erhalten.
+        oauthResponse := client.GetLastOAuthResponseContent;
         token := client.GetCurrentAuthorizationToken;
-        if token <> '' then
+        loggedIn := (token <> '') or ContainsText(oauthResponse,'access_token');
+        if loggedIn then
         begin
           Inc(countLoginOk);
-          Writeln('  LOGIN             : ok, Token mit '+IntToStr(Length(token))+' Zeichen');
+          if token <> '' then
+            Writeln('  LOGIN             : ok, Token mit '+IntToStr(Length(token))+' Zeichen')
+          else
+            Writeln('  LOGIN             : ok, Token nach der Antwort verworfen (401 oder 403)');
           //Nicht jeder Lieferant liefert ein Refresh-Token. Fehlt es, wird nach
           //Ablauf immer neu angemeldet.
-          oauthResponse := client.GetLastOAuthResponseContent;
           Writeln('    refresh_token   : '+YesNo(ContainsText(oauthResponse,'refresh_token'))+
                   ', expires_in '+YesNo(ContainsText(oauthResponse,'expires_in')));
         end
@@ -414,8 +444,8 @@ begin
           Writeln('  ARTIKEL '+artNo+' : kein Ergebnis');
           Writeln('    HTTP-Code       : '+IntToStr(client.GetLastErrorCode));
           Writeln('    Meldung         : '+ShortMsg(client.GetLastErrorMessage));
-          //Ohne Login ist jede weitere Abfrage sinnlos
-          if token <> '' then
+          //Ohne Anmeldung ist jede weitere Abfrage sinnlos
+          if loggedIn then
             NarrowDownFailure(ini,section,artNo,sendMode);
         end;
       finally

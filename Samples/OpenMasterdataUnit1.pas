@@ -73,6 +73,7 @@ type
     //Die Kundennummer gehoert nur dann in die Zugangsdaten, wenn der
     //Lieferant sie verlangt. Sonst haengt die Bibliothek sie an den
     //Benutzernamen an und der Login schlaegt fehl.
+    function ConfiguredFlag(const _Section,_Key : String; _Default : Boolean) : Boolean;
     function ConfiguredCustomerNumber(const _Section : String) : String;
     //Setzt die Haken der Datenpaketliste nach der Konfiguration
     procedure ApplyConfiguredDataPackages(const _Section : String);
@@ -127,12 +128,6 @@ begin
 
   Configuration.ReadSections(ComboBox1.Items);
 
-  if ComboBox1.Items.Count>0 then
-  begin
-    ComboBox1.ItemIndex := 0;
-    ComboBox1.OnSelect(nil);
-  end;
-
   Left := 50;
   Top := 50;
   Width := Screen.WorkAreaWidth-100;
@@ -146,8 +141,14 @@ begin
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_sparepartlists));
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_pictures));
   CheckListBox1.Items.Add(TOpenMasterdataAPI_DataPackageHelper.DataPackageAsString(omd_datapackage_documents));
-  for var i : Integer := 0 to CheckListBox1.Items.Count-1 do
-    CheckListBox1.Checked[i] := true;
+
+  //Erst jetzt den Lieferanten auswaehlen: ComboBox1Select setzt die Haken nach
+  //der Konfiguration, dafuer muessen die Eintraege bereits vorhanden sein.
+  if ComboBox1.Items.Count>0 then
+  begin
+    ComboBox1.ItemIndex := 0;
+    ComboBox1.OnSelect(nil);
+  end;
 
   EdgeBrowser1.UserDataFolder := ExtractFilePath(Application.ExeName);
   EdgeBrowser1.Navigate('about:blank');
@@ -265,19 +266,33 @@ begin
     profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
-//Zerlegt die konfigurierte API-Adresse in Schema, Host und Port. Ein reiner
-//Praefixvergleich reicht hier nicht: "https://api.example" ist auch ein
-//Praefix von "https://api.example.angreifer.tld", und dorthin duerfte der
-//Zugriffstoken niemals gehen.
+//Liest einen Ja-Nein-Schluessel. StrToBoolDef versteht nur True, False und
+//Zahlen; in Konfigurationen und in der Lieferantentabelle der Dokumentation
+//steht aber auch ja und nein. Ein nicht erkannter Wert wuerde stillschweigend
+//zur Vorgabe, was hier das Gegenteil des Gemeinten bedeuten kann.
+function TMainForm.ConfiguredFlag(const _Section,_Key : String;
+  _Default : Boolean) : Boolean;
+var
+  configuredValue : String;
+begin
+  configuredValue := Trim(Configuration.ReadString(_Section,_Key,''));
+  if configuredValue = '' then
+    exit(_Default);
+  if MatchText(configuredValue,['true','ja','yes','y','j','1','-1']) then
+    exit(true);
+  if MatchText(configuredValue,['false','nein','no','n','0']) then
+    exit(false);
+  Result := _Default;
+end;
+
 function TMainForm.ConfiguredCustomerNumber(const _Section : String) : String;
 begin
   //CustomernumberRequired steuert, ob der Lieferant die Kundennummer als
   //Teil der Anmeldung erwartet. Steht in der Konfiguration eine Nummer,
   //die der Lieferant nicht verlangt, wuerde sie den Benutzernamen
   //verfaelschen.
-  //ReadBool versteht nur 0 und 1, in der Konfiguration steht True bzw. False.
   //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
-  if not StrToBoolDef(Trim(Configuration.ReadString(_Section,'CustomernumberRequired','True')),true) then
+  if not ConfiguredFlag(_Section,'CustomernumberRequired',true) then
     exit('');
   Result := Configuration.ReadString(_Section,'Customernumber','');
 end;
@@ -311,6 +326,10 @@ begin
   end;
 end;
 
+//Zerlegt die konfigurierte API-Adresse in Schema, Host und Port. Ein reiner
+//Praefixvergleich reicht hier nicht: "https://api.example" ist auch ein
+//Praefix von "https://api.example.angreifer.tld", und dorthin duerfte der
+//Zugriffstoken niemals gehen.
 procedure TMainForm.SetAuthorizationTarget(const _URL : String);
 var
   uri : TURI;

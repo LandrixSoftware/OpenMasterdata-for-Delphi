@@ -877,15 +877,25 @@ begin
   if Trim(_Val) = '' then
     exit(_Default);
 
-  names := _Val.Split([',',';','|',' '],TStringSplitOptions.ExcludeEmpty);
+  //Tabulator und Zeilenumbruch zaehlen mit: eine ueber mehrere Zeilen
+  //fortgesetzte Angabe soll nicht als ein einziger, unbekannter Name gelten.
+  names := _Val.Split([',',';','|',' ',#9,#13,#10],TStringSplitOptions.ExcludeEmpty);
+
+  //Eine Angabe, die nur aus Trennern besteht, wuerde sonst wortlos in der
+  //Vorgabe verschwinden
+  if Length(names) = 0 then
+  begin
+    if Assigned(_UnknownNames) then
+      _UnknownNames.Add(Trim(_Val));
+    exit(_Default);
+  end;
+
   for name in names do
   begin
-    if Trim(name) = '' then
-      continue;
     if TryDataPackageFromString(name,package) then
       Include(Result,package)
     else
-    if Assigned(_UnknownNames) then
+    if Assigned(_UnknownNames) and (_UnknownNames.IndexOf(Trim(name)) < 0) then
       _UnknownNames.Add(Trim(name));
   end;
 
