@@ -1408,7 +1408,14 @@ begin
   try
 
   if not LoggedIn then
+  begin
+    //Login hinterlegt seine Meldung in den geteilten Feldern. Hier noch unter
+    //der Sperre uebernehmen, sonst erfaehrt der Aufrufer der Fetch-Funktionen
+    //keinen Grund fuer den Fehlschlag.
+    localStatusCode := FLastErrorCode;
+    localErrorMessage := FLastErrorMessage;
     exit;
+  end;
 
   FLastBySupplierPIDResponseContent := '';
   FLastErrorMessage := '';
@@ -1462,7 +1469,13 @@ begin
     RESTRequest.Response := RESTResponse;
 
     if not ExecuteWithRetry(RESTRequest,RESTResponse) then
+    begin
+      //Ebenso bei einem Transportfehler oder einem Abbruch wegen geaenderter
+      //Konfiguration: die Meldung steht nur in den geteilten Feldern.
+      localStatusCode := FLastErrorCode;
+      localErrorMessage := FLastErrorMessage;
       exit;
+    end;
 
     //Nur im Fehlerfall setzen, damit GetLastErrorCode nach einem erfolgreichen
     //Abruf 0 bleibt. Bei 950 und 951 bleibt der Code abfragbar.
@@ -1650,11 +1663,17 @@ class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   const _ConnectionName : String;
   const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient;
 begin
-  Result := NewOpenMasterdataConnection(_ConnectionName,
-              _Configuration.Username,_Configuration.Password,
-              _Configuration.CustomerNumber,_Configuration.ClientID,
-              _Configuration.ClientSecret,_Configuration.ClientScope,
-              _Configuration.GrantType,_Configuration.DataPackagesSendMode);
+  //Eine bestehende Verbindung bekommt alles allein ueber ApplyConfiguration,
+  //das die Uebernahme unter einer Sperre haelt. Die Ueberladung mit den
+  //einzelnen Parametern setzt in diesem Fall zuerst nur die Zugangsdaten; ein
+  //parallel laufender Abruf koennte sie mit den alten Adressen verbinden und
+  //sich damit am Endpunkt des vorherigen Lieferanten anmelden.
+  if not GetOpenMasterdataConnection(_ConnectionName,Result) then
+    Result := NewOpenMasterdataConnection(_ConnectionName,
+                _Configuration.Username,_Configuration.Password,
+                _Configuration.CustomerNumber,_Configuration.ClientID,
+                _Configuration.ClientSecret,_Configuration.ClientScope,
+                _Configuration.GrantType,_Configuration.DataPackagesSendMode);
   //Adressen, Datenpakete und Wiederholungsstrategie ebenfalls uebernehmen
   Result.ApplyConfiguration(_Configuration);
 end;
