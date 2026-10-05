@@ -44,6 +44,7 @@ uses
   System.DateUtils,
   System.IniFiles,
   System.SyncObjs,
+  System.NetEncoding,
   intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
   intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas',
@@ -1806,6 +1807,18 @@ begin
       exit(i);
 end;
 
+//Wert eines Parameters aus einem Formular-Body (a=1&b=2). Ein Vergleich per
+//Pos wuerde auch password=passXYZ oder otherpassword=pass gelten lassen.
+function StubFormValue(const _Body, _Name : String) : String;
+var
+  pair : String;
+begin
+  Result := '';
+  for pair in _Body.Split(['&']) do
+    if pair.StartsWith(_Name+'=') then
+      exit(TNetEncoding.URL.Decode(pair.Substring(Length(_Name)+1)));
+end;
+
 type
   //Fuehrt einen Abruf in einem eigenen Thread aus. Das Produkt gibt der Test frei.
   TStubFetchThread = class(TThread)
@@ -1875,9 +1888,9 @@ begin
     begin
       CheckEqualsStr('zuerst die Anmeldung',CStubOAuthPath,requests[0].Path);
       Check('Anmeldung als POST',SameText(requests[0].Method,'POST'),requests[0].Method);
-      Check('Grant-Type gesendet',Pos('grant_type=password',requests[0].Body) > 0,requests[0].Body);
-      Check('Benutzer gesendet',Pos('username=user',requests[0].Body) > 0,requests[0].Body);
-      Check('Passwort gesendet',Pos('password=pass',requests[0].Body) > 0,requests[0].Body);
+      CheckEqualsStr('Grant-Type gesendet','password',StubFormValue(requests[0].Body,'grant_type'));
+      CheckEqualsStr('Benutzer gesendet','user',StubFormValue(requests[0].Body,'username'));
+      CheckEqualsStr('Passwort gesendet','pass',StubFormValue(requests[0].Body,'password'));
       CheckEqualsStr('Token im Abruf','Bearer tok-1',requests[1].Authorization);
       Check('Datenpakete im Abruf',Pos('datapackage=',requests[1].Query) > 0,requests[1].Query);
     end;
@@ -2055,9 +2068,14 @@ procedure WaitForThreadOrAbort(_Thread : TThread; const _What : String);
 begin
   if WaitForSingleObject(_Thread.Handle,CStubThreadTimeoutMs) <> WAIT_OBJECT_0 then
   begin
-    Writeln('  FAIL ',_What,' -> nach ',CStubThreadTimeoutMs div 1000,
-      ' Sekunden nicht beendet, Testlauf wird abgebrochen');
-    Flush(Output);
+    //Die Ausgabe darf den Abbruch nicht verhindern: scheitert sie, liefe die
+    //Exception in ein Free, das auf den haengenden Thread unbegrenzt wartet
+    try
+      Writeln('  FAIL ',_What,' -> nach ',CStubThreadTimeoutMs div 1000,
+        ' Sekunden nicht beendet, Testlauf wird abgebrochen');
+      Flush(Output);
+    except
+    end;
     ExitProcess(3);
   end;
 end;
