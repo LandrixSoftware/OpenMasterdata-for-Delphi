@@ -36,6 +36,7 @@ program OpenMasterdataTests;
 {$APPTYPE CONSOLE}
 
 uses
+  Winapi.Windows,
   System.SysUtils,
   System.Classes,
   System.IOUtils,
@@ -1847,6 +1848,8 @@ begin
         exit(TStubReply.Make(200,CStubTokenResponse));
       if Pos('supplierPid=OK',_Request.Query) > 0 then
         exit(TStubReply.Make(200,StubProduct('OK')));
+      if Pos('supplierPid=KAPUTT',_Request.Query) > 0 then
+        exit(TStubReply.Make(200,'{"supplierPid":'));
       if Pos('supplierPid=ALT',_Request.Query) > 0 then
         exit(TStubReply.Make(COpenMasterdataStatusAlternativeProduct,StubProduct('ALT-ERSATZ')));
       Result := TStubReply.Make(404,'{"error":"not found"}');
@@ -1874,6 +1877,7 @@ begin
       Check('Anmeldung als POST',SameText(requests[0].Method,'POST'),requests[0].Method);
       Check('Grant-Type gesendet',Pos('grant_type=password',requests[0].Body) > 0,requests[0].Body);
       Check('Benutzer gesendet',Pos('username=user',requests[0].Body) > 0,requests[0].Body);
+      Check('Passwort gesendet',Pos('password=pass',requests[0].Body) > 0,requests[0].Body);
       CheckEqualsStr('Token im Abruf','Bearer tok-1',requests[1].Authorization);
       Check('Datenpakete im Abruf',Pos('datapackage=',requests[1].Query) > 0,requests[1].Query);
     end;
@@ -1895,6 +1899,17 @@ begin
       Check('als Alternative erkennbar',response.IsAlternativeProduct);
       if Assigned(response.Product) then
         CheckEqualsStr('das Ersatzprodukt','ALT-ERSATZ',response.Product.supplierPid);
+    finally
+      response.Product.Free;
+    end;
+
+    //Status 200, aber eine Antwort, die sich nicht lesen laesst
+    response := client.FetchBySupplierPid('KAPUTT');
+    try
+      Check('unlesbare Antwort ist kein Erfolg',not response.Success);
+      CheckEqualsInt('HTTP-Status bleibt erhalten',200,response.StatusCode);
+      Check('Meldung vorhanden',response.ErrorMessage <> '');
+      Check('kein Produkt bei unlesbarer Antwort',response.Product = nil);
     finally
       response.Product.Free;
     end;
@@ -2029,6 +2044,44 @@ begin
   end;
 end;
 
+//Laenger als jeder Abruf in diesen Tests dauern darf. Laeuft die Zeit ab,
+//haengt der Client, etwa in einer Verklemmung; dann wird der Testlauf
+//abgebrochen statt endlos zu warten. Freigeben laesst sich ein haengender
+//Thread nicht, ein geordnetes Beenden wuerde ebenfalls haengen.
+const
+  CStubThreadTimeoutMs = 30000;
+
+procedure WaitForThreadOrAbort(_Thread : TThread; const _What : String);
+begin
+  if WaitForSingleObject(_Thread.Handle,CStubThreadTimeoutMs) <> WAIT_OBJECT_0 then
+  begin
+    Writeln('  FAIL ',_What,' -> nach ',CStubThreadTimeoutMs div 1000,
+      ' Sekunden nicht beendet, Testlauf wird abgebrochen');
+    Flush(Output);
+    ExitProcess(3);
+  end;
+end;
+
+//Wartet auf den Thread und gibt erst danach sein Produkt frei: solange er
+//laeuft, kann er es noch eintragen.
+procedure FreeFetchThread(var _Thread : TStubFetchThread);
+begin
+  if _Thread = nil then
+    exit;
+  WaitForThreadOrAbort(_Thread,'Abruf '+_Thread.FPid);
+  _Thread.Response.Product.Free;
+  FreeAndNil(_Thread);
+end;
+
+//Wartezeit vor dem Wiederholversuch in den Nebenlaeufigkeitstests. Die
+//Ueberlappung laesst sich von aussen nicht erzwingen: der Client meldet nicht,
+//wann er die Sperre freigibt. Das Ereignis faellt, wenn der Server die erste
+//Antwort schickt, und der Hauptthread muss danach innerhalb dieser Zeit zum
+//Zug kommen. Verfehlt er sie, schlaegt die Reihenfolgepruefung an; der Test
+//wird dann rot, nicht faelschlich gruen.
+const
+  CStubRetryAfter = '2';
+
 //Abruf A wartet ohne Sperre auf seinen Wiederholversuch, Abruf B laeuft auf
 //derselben Verbindung in die Luecke und hinterlaesst 404 in den geteilten
 //Feldern. A muss trotzdem seinen eigenen Status melden.
@@ -2037,35 +2090,59 @@ var
   server : TStubServer;
   client : IOpenMasterdataApiClient;
   waiting : TEvent;
-  thread : TStubFetchThread;
-  responseB : TOpenMasterdataResponse;
+  threadA, threadB : TStubFetchThread;
   slowCalls : Integer;
-  firstSlow, indexB : Integer;
+
+  //A1 -> B -> A2 in der Reihenfolge der beim Server eingegangenen Anfragen
+  function BRanInGap(const _PidA : String) : Boolean;
+  var
+    firstA, indexB : Integer;
+  begin
+    firstA := StubRequestIndex(server,'supplierPid='+_PidA);
+    indexB := StubRequestIndex(server,'supplierPid=FEHLT',firstA+1);
+    Result := (firstA >= 0) and (indexB > firstA) and
+              (StubRequestIndex(server,'supplierPid='+_PidA,indexB+1) > indexB);
+  end;
+
+  //Startet A, wartet auf dessen erste Antwort und schickt dann B hinterher
+  function RunPair(const _PidA : String) : Boolean;
+  begin
+    waiting.ResetEvent;
+    threadA := TStubFetchThread.Create(client,_PidA);
+    Result := waiting.WaitFor(10000) = wrSignaled;
+    Check('A erreicht die Wartezeit',Result);
+    threadB := TStubFetchThread.Create(client,'FEHLT');
+    WaitForThreadOrAbort(threadB,'Abruf B');
+    WaitForThreadOrAbort(threadA,'Abruf A');
+  end;
+
 begin
   Writeln('HTTP: zweiter Abruf waehrend der Wartezeit des ersten');
 
   slowCalls := 0;
+  threadA := nil;
+  threadB := nil;
   waiting := TEvent.Create(nil,true,false,'');
   server := TStubServer.Create(
     function(const _Request : TStubRequest) : TStubReply
     begin
       if _Request.Path = CStubOAuthPath then
         exit(TStubReply.Make(200,CStubTokenResponse));
-      //SLOW: zuerst 503 mit einer Sekunde Wartezeit, dann der Artikel
+      //SLOW: zuerst 503 mit Wartezeit, dann der Artikel
       if Pos('supplierPid=SLOW',_Request.Query) > 0 then
       begin
         if TInterlocked.Increment(slowCalls) = 1 then
         begin
           waiting.SetEvent;
-          exit(TStubReply.Make(503,'','1'));
+          exit(TStubReply.Make(503,'',CStubRetryAfter));
         end;
         exit(TStubReply.Make(200,StubProduct('SLOW')));
       end;
-      //STUCK: immer 503 mit einer Sekunde Wartezeit
+      //STUCK: immer 503 mit Wartezeit
       if Pos('supplierPid=STUCK',_Request.Query) > 0 then
       begin
         waiting.SetEvent;
-        exit(TStubReply.Make(503,'{"error":"busy"}','1'));
+        exit(TStubReply.Make(503,'{"error":"busy"}',CStubRetryAfter));
       end;
       Result := TStubReply.Make(404,'{"error":"not found"}');
     end);
@@ -2073,48 +2150,37 @@ begin
     client := CreateStubClient(server,1);
 
     //A gelingt im zweiten Versuch
-    thread := TStubFetchThread.Create(client,'SLOW');
     try
-      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
-      responseB := client.FetchBySupplierPid('FEHLT');
-      responseB.Product.Free;
-      thread.WaitFor;
-
-      firstSlow := StubRequestIndex(server,'supplierPid=SLOW');
-      indexB := StubRequestIndex(server,'supplierPid=FEHLT');
-      //Sonst hat der Test die Luecke gar nicht getroffen
-      Check('B lief zwischen den Versuchen von A',
-        (firstSlow >= 0) and (indexB > firstSlow) and
-        (StubRequestIndex(server,'supplierPid=SLOW',indexB) > indexB));
-
-      CheckEqualsInt('B meldet 404',404,responseB.StatusCode);
-      Check('A gelingt',thread.Response.Success,thread.Response.ErrorMessage);
-      CheckEqualsInt('A meldet seinen eigenen Status',200,thread.Response.StatusCode);
-      CheckEqualsStr('A hat keine fremde Meldung','',thread.Response.ErrorMessage);
+      if RunPair('SLOW') then
+      begin
+        Check('B lief zwischen den Versuchen von A',BRanInGap('SLOW'));
+        CheckEqualsInt('B meldet 404',404,threadB.Response.StatusCode);
+        Check('A gelingt',threadA.Response.Success,threadA.Response.ErrorMessage);
+        CheckEqualsInt('A meldet seinen eigenen Status',200,threadA.Response.StatusCode);
+        CheckEqualsStr('A hat keine fremde Meldung','',threadA.Response.ErrorMessage);
+      end;
     finally
-      thread.Response.Product.Free;
-      thread.Free;
+      FreeFetchThread(threadB);
+      FreeFetchThread(threadA);
     end;
 
     //A scheitert endgueltig, B liefert in der Luecke 404
-    waiting.ResetEvent;
-    thread := TStubFetchThread.Create(client,'STUCK');
     try
-      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
-      responseB := client.FetchBySupplierPid('FEHLT');
-      responseB.Product.Free;
-      thread.WaitFor;
-
-      CheckEqualsInt('zwei Versuche von A',2,server.RequestCount(CStubProductPath,'supplierPid=STUCK'));
-      Check('A scheitert',not thread.Response.Success);
-      CheckEqualsInt('A meldet 503, nicht das 404 von B',503,thread.Response.StatusCode);
-      Check('A meldet die eigene Meldung, nicht die von B',
-        (thread.Response.ErrorMessage <> '') and
-        (Pos('nicht gefunden',thread.Response.ErrorMessage) = 0),
-        thread.Response.ErrorMessage);
+      if RunPair('STUCK') then
+      begin
+        Check('B lief zwischen den Versuchen von A',BRanInGap('STUCK'));
+        CheckEqualsInt('B meldet 404',404,threadB.Response.StatusCode);
+        CheckEqualsInt('zwei Versuche von A',2,server.RequestCount(CStubProductPath,'supplierPid=STUCK'));
+        Check('A scheitert',not threadA.Response.Success);
+        CheckEqualsInt('A meldet 503, nicht das 404 von B',503,threadA.Response.StatusCode);
+        Check('A meldet die eigene Meldung, nicht die von B',
+          (threadA.Response.ErrorMessage <> '') and
+          (Pos('nicht gefunden',threadA.Response.ErrorMessage) = 0),
+          threadA.Response.ErrorMessage);
+      end;
     finally
-      thread.Response.Product.Free;
-      thread.Free;
+      FreeFetchThread(threadB);
+      FreeFetchThread(threadA);
     end;
   finally
     client := nil;
@@ -2131,9 +2197,11 @@ var
   client : IOpenMasterdataApiClient;
   waiting : TEvent;
   thread : TStubFetchThread;
+  setter : TThread;
 begin
   Writeln('HTTP: Konfiguration aendert sich waehrend der Wartezeit');
 
+  thread := nil;
   waiting := TEvent.Create(nil,true,false,'');
   server := TStubServer.Create(
     function(const _Request : TStubRequest) : TStubReply
@@ -2143,7 +2211,7 @@ begin
       if _Request.Path = CStubProductPath then
       begin
         waiting.SetEvent;
-        exit(TStubReply.Make(503,'','1'));
+        exit(TStubReply.Make(503,'',CStubRetryAfter));
       end;
       Result := TStubReply.Make(200,StubProduct('ANDERS'));
     end);
@@ -2152,19 +2220,34 @@ begin
 
     thread := TStubFetchThread.Create(client,'X');
     try
-      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
-      client.SetBySupplierPIDURL(server.Url('/anderer/endpunkt'));
-      thread.WaitFor;
+      if waiting.WaitFor(10000) = wrSignaled then
+      begin
+        //Auch der Setter nimmt die Sperre und kann damit haengen
+        setter := TThread.CreateAnonymousThread(
+          procedure
+          begin
+            client.SetBySupplierPIDURL(server.Url('/anderer/endpunkt'));
+          end);
+        setter.FreeOnTerminate := false;
+        try
+          setter.Start;
+          WaitForThreadOrAbort(setter,'Aendern der Adresse');
+        finally
+          setter.Free;
+        end;
+        WaitForThreadOrAbort(thread,'Abruf');
 
-      Check('Abruf wird abgebrochen',not thread.Response.Success);
-      CheckEqualsInt('Status des letzten Versuchs',503,thread.Response.StatusCode);
-      Check('Meldung nennt den Grund',Pos('Konfiguration',thread.Response.ErrorMessage) > 0,
-        thread.Response.ErrorMessage);
-      CheckEqualsInt('nur ein Versuch am alten Endpunkt',1,server.RequestCount(CStubProductPath));
-      CheckEqualsInt('nichts an den neuen Endpunkt',0,server.RequestCount('/anderer/endpunkt'));
+        Check('Abruf wird abgebrochen',not thread.Response.Success);
+        CheckEqualsInt('Status des letzten Versuchs',503,thread.Response.StatusCode);
+        Check('Meldung nennt den Grund',Pos('Konfiguration',thread.Response.ErrorMessage) > 0,
+          thread.Response.ErrorMessage);
+        CheckEqualsInt('nur ein Versuch am alten Endpunkt',1,server.RequestCount(CStubProductPath));
+        CheckEqualsInt('nichts an den neuen Endpunkt',0,server.RequestCount('/anderer/endpunkt'));
+      end
+      else
+        Check('A erreicht die Wartezeit',false);
     finally
-      thread.Response.Product.Free;
-      thread.Free;
+      FreeFetchThread(thread);
     end;
   finally
     client := nil;
@@ -2174,7 +2257,10 @@ begin
 end;
 
 //Zwei Threads legen gleichzeitig eine Verbindung desselben Namens an. Es darf
-//nur eine entstehen, und beide muessen sie erhalten.
+//nur eine entstehen, und beide muessen sie erhalten. Das ist eine Stressprobe:
+//ob die beiden Aufrufe in einem Durchlauf tatsaechlich ueberlappen, laesst sich
+//nicht feststellen. Mit wieder getrenntem Suchen und Anlegen schlugen alle
+//50 Durchlaeufe an.
 procedure TestConcurrentConnectionCreation;
 const
   CRounds = 50;
@@ -2223,8 +2309,8 @@ begin
         threadA.Start;
         threadB.Start;
         start.SetEvent;
-        threadA.WaitFor;
-        threadB.WaitFor;
+        WaitForThreadOrAbort(threadA,'Anlegen A');
+        WaitForThreadOrAbort(threadB,'Anlegen B');
       finally
         threadA.Free;
         threadB.Free;
