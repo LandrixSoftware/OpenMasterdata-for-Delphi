@@ -229,8 +229,9 @@ In der Konfiguration sind `True`/`False` die üblichen Werte; `ja`/`nein` werden
 | Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Sonepar | ja | password | exploded | ja | ja | nein |
 | Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
-| Reisser AG| ja | password | pipedelimited | ja | ja | nein |
-| Viessmann| ja | password | pipedelimited | ja | Nein | Ja |
+| Reisser AG | ja | password | pipedelimited | ja | ja | nein |
+| Viessmann | ja | password | pipedelimited | ja | nein | ja |
+| Deinzer & Weyland GmbH | ja | password | pipedelimited | ja | ja | ja |
 
 # Lizenz / License
 
@@ -269,4 +270,5 @@ Geändertes Verhalten bei gleicher Signatur:
  - `NewOpenMasterdataConnection` übernimmt bei bereits bekanntem Verbindungsnamen die übergebenen Zugangsdaten. Weichen sie ab, wird der bisherige Token verworfen.
  - `GetLastErrorCode` liefert nach einem erfolgreichen Abruf 0. Bei den Sonderstatus 950 und 951 bleibt der Statuscode erhalten, obwohl der Abruf als erfolgreich gilt.
  - `AsHtml` reicht Lieferanten-HTML nicht mehr unverändert durch. Nicht freigegebene Tags und sämtliche Attribute werden entfernt, Adressen nur mit den Schemata `http`, `https` und `mailto` verlinkt.
+ - `AsHtml` gibt zusätzlich `descriptions.marketingText` aus, sofern er nicht mit `productDescr` übereinstimmt. Einige Lieferanten führen die Beschreibung ausschließlich dort; bisher blieb sie unsichtbar. Freigegeben sind jetzt auch `u`, `i`, `h3`, `h4`, `h5` und `hr` — `h1` und `h2` bleiben der Ansicht selbst vorbehalten.
  - Fehlgeschlagene Bild- und Dokumentdownloads werden nicht mehr zwischengespeichert, sondern beim nächsten Zugriff erneut versucht.

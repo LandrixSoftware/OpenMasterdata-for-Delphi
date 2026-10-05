@@ -881,6 +881,142 @@ end;
 //Die Maskierung muss in beide Richtungen stimmen: zu wenig maskieren ist
 //gefaehrlich, zu viel zerstoert die Anzeige. Beide Tests sind deshalb positiv
 //formuliert, nicht als blosse Abwesenheitspruefung.
+//Zaehlt, wie oft ein Text vorkommt. Fuer die Frage, ob etwas doppelt in der
+//Anzeige landet, genuegt ein Vergleich auf Vorhandensein nicht.
+function OccurrenceCount(const _Needle, _Haystack : String) : Integer;
+var
+  position : Integer;
+begin
+  Result := 0;
+  if (_Needle = '') or (_Haystack = '') then
+    exit;
+  position := Pos(_Needle,_Haystack);
+  while position > 0 do
+  begin
+    Inc(Result);
+    position := PosEx(_Needle,_Haystack,position+Length(_Needle));
+  end;
+end;
+
+//Manche Lieferanten fuehren die Beschreibung ausschliesslich im Marketingtext.
+//Ohne dessen Ausgabe bliebe sie dem Anwender verborgen.
+procedure TestMarketingTextIsShown;
+var
+  res : TOpenMasterdataAPI_Result;
+  html : String;
+begin
+  Writeln('Marketingtext in der Ansicht');
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    res.descriptions.productDescr := 'Kurze Beschreibung';
+    res.descriptions.marketingText := '<u>Ausstattung</u> Dichtelemente EPDM';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('Beschreibung erscheint',ContainsText(html,'Kurze Beschreibung'),html);
+    Check('Marketingtext erscheint',ContainsText(html,'Dichtelemente EPDM'),html);
+
+    //Fuehrt ein Lieferant beide Felder gleich, soll der Text nicht doppelt
+    //in der Anzeige stehen
+    res.descriptions.productDescr := 'Derselbe Text';
+    res.descriptions.marketingText := 'Derselbe Text';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('gleicher Text erscheint nur einmal',1,
+      OccurrenceCount('Derselbe Text',html));
+
+    //Leerraum und Gross- und Kleinschreibung sind kein Unterschied
+    res.descriptions.productDescr := 'Derselbe Text';
+    res.descriptions.marketingText := '  derselbe text  ';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('nur in der Schreibweise abweichender Text erscheint einmal',1,
+      OccurrenceCount('erselbe',html));
+
+    //Ein wirklich anderer Text erscheint zusaetzlich
+    res.descriptions.productDescr := 'Beschreibung';
+    res.descriptions.marketingText := 'Beschreibung mit Zusatz';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('abweichender Text erscheint zusaetzlich',2,
+      OccurrenceCount('Beschreibung',html));
+
+    //Nur der Marketingtext, ohne Beschreibung
+    res.descriptions.productDescr := '';
+    res.descriptions.marketingText := 'Nur im Marketingtext';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('Marketingtext allein erscheint',ContainsText(html,'Nur im Marketingtext'),html);
+
+    //Ein leeres Feld fuegt nichts hinzu
+    res.descriptions.productDescr := 'Beschreibung';
+    res.descriptions.marketingText := '';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('leerer Marketingtext fuegt nichts hinzu',1,
+      OccurrenceCount('Beschreibung',html));
+  finally
+    res.Free;
+  end;
+end;
+
+//Die erweiterte Positivliste. Textauszeichnung soll erhalten bleiben, alles
+//mit Wirkung weiterhin verschwinden.
+procedure TestAllowedTagsForSupplierText;
+var
+  res : TOpenMasterdataAPI_Result;
+  html : String;
+
+  function Render(const _Descr : String) : String;
+  begin
+    res.descriptions.productDescr := _Descr;
+    Result := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+  end;
+
+begin
+  Writeln('Positivliste fuer Lieferantentexte');
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    //Neu erlaubt
+    html := Render('<p>Text mit <u>Unterstreichung</u> und <i>Kursiv</i></p>');
+    Check('u bleibt erhalten',ContainsText(html,'<u>Unterstreichung</u>'),html);
+    Check('i bleibt erhalten',ContainsText(html,'<i>Kursiv</i>'),html);
+
+    html := Render('<h3>Ausstattung</h3><p>Dichtelemente</p>');
+    Check('h3 bleibt erhalten',ContainsText(html,'<h3>Ausstattung</h3>'),html);
+    html := Render('<h4>Technik</h4><h5>Details</h5>');
+    Check('h4 bleibt erhalten',ContainsText(html,'<h4>Technik</h4>'),html);
+    Check('h5 bleibt erhalten',ContainsText(html,'<h5>Details</h5>'),html);
+    html := Render('<p>Oben</p><hr><p>Unten</p>');
+    Check('hr bleibt erhalten',ContainsText(html,'<hr>'),html);
+
+    //Ein einzelnes erlaubtes Tag genuegt, damit der Text als HTML gilt und
+    //nicht woertlich mit maskierten Klammern erscheint
+    html := Render('<u>Ausstattung</u> Dichtelemente EPDM');
+    Check('Text wird als HTML behandelt',not ContainsText(html,'&lt;u&gt;'),html);
+    Check('Inhalt bleibt erhalten',ContainsText(html,'Dichtelemente EPDM'),html);
+
+    //h1 und h2 vergibt die Ansicht selbst fuer Artikelnummer und Kurztext,
+    //ein Lieferantentext darf sie nicht setzen
+    html := Render('<p>Text</p><h1>Fremde Ueberschrift</h1>');
+    Check('h1 wird verworfen',not ContainsText(html,'<h1>Fremde'),html);
+    Check('der Text dazu bleibt',ContainsText(html,'Fremde Ueberschrift'),html);
+
+    //Die Erweiterung darf keine Wirkung durchlassen
+    html := Render('<p>vor</p><script>alert(1)</script><p>nach</p>');
+    Check('script wird verworfen',not ContainsText(html,'<script'),html);
+    html := Render('<u onmouseover="alert(1)">Text</u>');
+    Check('Attribute werden verworfen',not ContainsText(html,'onmouseover'),html);
+    html := Render('<iframe src="https://fremd"></iframe><p>Text</p>');
+    Check('iframe wird verworfen',not ContainsText(html,'<iframe'),html);
+    html := Render('<hr onload="alert(1)">');
+    Check('Attribut an hr wird verworfen',not ContainsText(html,'onload'),html);
+
+    //Ein Tag, das kein HTML ist, wird weiterhin verworfen. Die Abbildung von
+    //bold auf b ist bewusst nicht umgesetzt.
+    html := Render('<u>A</u><bold>B</bold>');
+    Check('bold wird verworfen',not ContainsText(html,'<bold'),html);
+    Check('Text aus bold bleibt erhalten',ContainsText(html,'B'),html);
+  finally
+    res.Free;
+  end;
+end;
+
 procedure TestSanitizerEscaping;
 var
   html : String;
@@ -1679,6 +1815,10 @@ begin
     TestEnumRoundTrip;
     Writeln;
     TestSanitizerEscaping;
+    Writeln;
+    TestMarketingTextIsShown;
+    Writeln;
+    TestAllowedTagsForSupplierText;
     Writeln;
     TestSanitizerPerformance;
     Writeln;

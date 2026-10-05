@@ -49,8 +49,14 @@ var
   i : Integer;
 
   const
-    CAllowedTags : array[0..13] of String = (
-      'p','br','div','span','ul','ol','li','table','tr','td','th','strong','em','b');
+    //Nur diese Tags duerfen durch. Alle fuehren keine Wirkung ausser
+    //Textauszeichnung mit sich; Attribute werden ohnehin verworfen.
+    //u und i kommen in Lieferantentexten vor, h3 bis h5 gliedern laengere
+    //Marketingtexte. h1 und h2 fehlen bewusst: die vergibt die Ansicht selbst
+    //fuer Artikelnummer und Kurztext.
+    CAllowedTags : array[0..19] of String = (
+      'p','br','div','span','ul','ol','li','table','tr','td','th','strong','em','b',
+      'u','i','h3','h4','h5','hr');
 
   function HtmlEncode(const _Value : String) : String;
   begin
@@ -414,6 +420,14 @@ begin
     html.Add('<h2>'+HtmlEncode(_Val.basic.productShortDescr)+'</h2>');
     if _Val.descriptions.productDescr <> '' then
       html.Add(RenderDescription(_Val.descriptions.productDescr));
+
+    //Manche Lieferanten fuehren die Beschreibung ausschliesslich im
+    //Marketingtext; ohne diese Zeile bliebe sie unsichtbar. Stimmt er mit der
+    //Beschreibung ueberein, wird er nicht zweimal ausgegeben.
+    if (_Val.descriptions.marketingText <> '') and
+       (not SameText(Trim(_Val.descriptions.marketingText),
+                     Trim(_Val.descriptions.productDescr))) then
+      html.Add(RenderDescription(_Val.descriptions.marketingText));
 
     var deepLinkUrl : String := SafeUrl(_Val.additional.deepLink);
     if deepLinkUrl <> '' then
