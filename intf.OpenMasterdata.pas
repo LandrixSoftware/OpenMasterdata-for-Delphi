@@ -327,6 +327,10 @@ type
     //samt Adressen, Datenpaketauswahl und Wiederholungsstrategie.
     class function NewOpenMasterdataConnection(const _ConnectionName : String;
       const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient; overload;
+    //Sucht und legt unter einer Sperre an. Getrennt ausgefuehrt koennte ein
+    //anderer Thread zwischen beidem eine gleichnamige Verbindung anlegen.
+    class function FindOrCreateConnection(const _ConnectionName : String;
+      const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient; static;
     //Direkt aus einem Abschnitt einer Ini-Datei
     class function NewOpenMasterdataConnection(const _ConnectionName : String;
       _Ini : TCustomIniFile; const _Section : String;
@@ -1409,10 +1413,12 @@ begin
 
   if not LoggedIn then
   begin
-    //Login hinterlegt seine Meldung in den geteilten Feldern. Hier noch unter
-    //der Sperre uebernehmen, sonst erfaehrt der Aufrufer der Fetch-Funktionen
-    //keinen Grund fuer den Fehlschlag.
-    localStatusCode := FLastErrorCode;
+    //Der Abruf hat nicht stattgefunden, es gibt also keinen Produktstatus;
+    //localStatusCode bleibt 0. Uebernommen wird nur die Meldung des Logins.
+    //FLastErrorCode taugt dafuer nicht: bei einer OAuth-Antwort mit Status 200
+    //ohne Token setzt Login ihn gar nicht, und waehrend einer Wartezeit kann
+    //ein fremder Abruf ihn beschrieben haben. Die Meldung dagegen setzt Login
+    //nach seinem letzten Warten, sie gehoert zu diesem Aufruf.
     localErrorMessage := FLastErrorMessage;
     exit;
   end;
@@ -1470,9 +1476,10 @@ begin
 
     if not ExecuteWithRetry(RESTRequest,RESTResponse) then
     begin
-      //Ebenso bei einem Transportfehler oder einem Abbruch wegen geaenderter
-      //Konfiguration: die Meldung steht nur in den geteilten Feldern.
-      localStatusCode := FLastErrorCode;
+      //Der Status des letzten Versuchs steht im eigenen Response-Objekt, nicht
+      //in FLastErrorCode: ExecuteWithRetry setzt bei seinen Abbruechen nur die
+      //Meldung, der Code waere der eines frueheren oder fremden Abrufs.
+      localStatusCode := RESTResponse.StatusCode;
       localErrorMessage := FLastErrorMessage;
       exit;
     end;
@@ -1659,22 +1666,50 @@ begin
     Result.StatusCode := Result.Product.status;
 end;
 
-class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
+class function TOpenMasterdataApiClient.FindOrCreateConnection(
   const _ConnectionName : String;
   const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient;
+var
+  i : Integer;
 begin
-  //Eine bestehende Verbindung bekommt alles allein ueber ApplyConfiguration,
-  //das die Uebernahme unter einer Sperre haelt. Die Ueberladung mit den
-  //einzelnen Parametern setzt in diesem Fall zuerst nur die Zugangsdaten; ein
-  //parallel laufender Abruf koennte sie mit den alten Adressen verbinden und
-  //sich damit am Endpunkt des vorherigen Lieferanten anmelden.
-  if not GetOpenMasterdataConnection(_ConnectionName,Result) then
-    Result := NewOpenMasterdataConnection(_ConnectionName,
+  EnsureOpenConnectionsInitialized;
+  openConnectionsCS.Acquire;
+  try
+    for i := 0 to openConnections.Count-1 do
+      if SameText(_ConnectionName,
+           IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+        //Eine bestehende Verbindung wird unveraendert zurueckgegeben. Die
+        //Zugangsdaten setzt allein ApplyConfiguration, zusammen mit den
+        //Adressen und unter einer Sperre.
+        exit(IOpenMasterdataApiClient(openConnections[i]));
+
+    //Eine neue Verbindung erhaelt die Zugangsdaten schon im Konstruktor. Sie
+    //ist damit von ihrem ersten sichtbaren Augenblick an stimmig; bis
+    //ApplyConfiguration die Adressen nachtraegt, scheitert ein paralleler
+    //Abruf mit "keine URL konfiguriert" statt mit falschen Daten.
+    Result := TOpenMasterdataApiClient.Create(_ConnectionName,
                 _Configuration.Username,_Configuration.Password,
                 _Configuration.CustomerNumber,_Configuration.ClientID,
                 _Configuration.ClientSecret,_Configuration.ClientScope,
                 _Configuration.GrantType,_Configuration.DataPackagesSendMode);
-  //Adressen, Datenpakete und Wiederholungsstrategie ebenfalls uebernehmen
+    openConnections.Add(Result);
+  finally
+    openConnectionsCS.Release;
+  end;
+end;
+
+class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
+  const _ConnectionName : String;
+  const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient;
+begin
+  //Suchen und Anlegen gehoeren in denselben Sperrabschnitt. Getrennt
+  //ausgefuehrt kann ein anderer Thread dazwischen eine gleichnamige Verbindung
+  //anlegen; die Ueberladung mit den einzelnen Parametern wuerde dann nur deren
+  //Zugangsdaten austauschen und die Adressen des anderen Lieferanten stehen
+  //lassen.
+  Result := FindOrCreateConnection(_ConnectionName,_Configuration);
+  //Adressen, Datenpakete und Wiederholungsstrategie uebernehmen, unter einer
+  //Sperre und damit als Ganzes
   Result.ApplyConfiguration(_Configuration);
 end;
 
