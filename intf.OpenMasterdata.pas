@@ -1382,9 +1382,27 @@ var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
   parseError : String;
+  //Nur dieser Aufruf beschreibt sie. Die Felder FLastErrorCode und
+  //FLastErrorMessage sind geteilt, und sie sind nicht einmal fuer die Dauer
+  //eines Abrufs verlaesslich: wartet dieser Abruf vor einem Wiederholversuch,
+  //gibt SleepWithoutLock die Sperre frei, und ein anderer Abruf schreibt in
+  //der Luecke sein eigenes Ergebnis hinein.
+  localStatusCode : Integer;
+  localErrorMessage : String;
+
+  //Haelt beide Staende im Gleichlauf: den geteilten fuer GetLastErrorMessage
+  //und den eigenen fuer die Rueckgabe.
+  procedure SetError(const _Message : String);
+  begin
+    localErrorMessage := _Message;
+    FLastErrorMessage := _Message;
+  end;
+
 begin
   Result := false;
   _Result := nil;
+  localStatusCode := 0;
+  localErrorMessage := '';
 
   FCS.Acquire;
   try
@@ -1398,19 +1416,19 @@ begin
 
   if (_RestClient = nil) or _Resource.IsEmpty then
   begin
-    FLastErrorMessage := 'Fuer diese Abfrage ist keine URL konfiguriert.';
+    SetError('Fuer diese Abfrage ist keine URL konfiguriert.');
     exit;
   end;
   if ((_IdentifierName1 <> '') and _IdentifierValue1.IsEmpty) or
      ((_IdentifierName2 <> '') and _IdentifierValue2.IsEmpty) or
      ((_IdentifierName3 <> '') and _IdentifierValue3.IsEmpty) then
   begin
-    FLastErrorMessage := 'Die Abfrage enthaelt kein vollstaendiges Suchkriterium.';
+    SetError('Die Abfrage enthaelt kein vollstaendiges Suchkriterium.');
     exit;
   end;
   if _DataPackages = [] then
   begin
-    FLastErrorMessage := 'Es wurde kein Datenpaket ausgewaehlt.';
+    SetError('Es wurde kein Datenpaket ausgewaehlt.');
     exit;
   end;
 
@@ -1450,6 +1468,8 @@ begin
     //Abruf 0 bleibt. Bei 950 und 951 bleibt der Code abfragbar.
     if RESTResponse.StatusCode <> 200 then
       FLastErrorCode := RESTResponse.StatusCode;
+    //Der eigene Stand nimmt den Status dieser Antwort, auch wenn er 200 ist
+    localStatusCode := RESTResponse.StatusCode;
 
     //Ein abgelaufener oder zurueckgezogener Token muss verworfen werden,
     //sonst laufen alle weiteren Abfragen bis zum rechnerischen Ablauf in 401
@@ -1465,9 +1485,9 @@ begin
             (RESTResponse.StatusCode = COpenMasterdataStatusAlternativeProduct) or
             (RESTResponse.StatusCode = COpenMasterdataStatusSuccessorProduct)) then
     begin
-      FLastErrorMessage := AppendResponseDetail(
+      SetError(AppendResponseDetail(
         StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText),
-        RESTResponse.Content);
+        RESTResponse.Content));
       FLastBySupplierPIDResponseContent := RESTResponse.Content;
       exit;
     end;
@@ -1479,7 +1499,7 @@ begin
       if not _Result.TryLoadFromJson(RESTResponse.Content,parseError) then
       begin
         FreeAndNil(_Result);
-        FLastErrorMessage := parseError;
+        SetError(parseError);
         exit;
       end;
       //Erst ab OM 11 fuehrt die Antwort den Status als Feld. Fehlt er, wird der
@@ -1492,7 +1512,7 @@ begin
       on E:Exception do
       begin
         FreeAndNil(_Result);
-        FLastErrorMessage := E.ClassName+' '+e.Message;
+        SetError(E.ClassName+' '+e.Message);
         exit;
       end;
     end;
@@ -1502,11 +1522,10 @@ begin
   end;
 
   finally
-    //Noch unter der Sperre: danach koennte ein anderer Thread die Felder
-    //bereits mit seinem eigenen Ergebnis ueberschrieben haben. Das finally
+    //Aus den eigenen Variablen, nicht aus den geteilten Feldern. Das finally
     //laeuft auch bei jedem vorzeitigen exit.
-    _StatusCode := FLastErrorCode;
-    _ErrorMessage := FLastErrorMessage;
+    _StatusCode := localStatusCode;
+    _ErrorMessage := localErrorMessage;
     FCS.Release;
   end;
 end;
@@ -1514,20 +1533,26 @@ end;
 procedure TOpenMasterdataApiClient.ApplyConfiguration(
   const _Configuration : TOpenMasterdataConfiguration);
 begin
-  SetCredentials(_Configuration.Username,_Configuration.Password,
-    _Configuration.CustomerNumber,_Configuration.ClientID,
-    _Configuration.ClientSecret,_Configuration.ClientScope,
-    _Configuration.GrantType,_Configuration.DataPackagesSendMode);
-
-  SetOAuthURL(_Configuration.OAuthURL);
-  SetBySupplierPIDURL(_Configuration.BySupplierPIDURL);
-  SetByManufacturerDataURL(_Configuration.ByManufacturerDataURL);
-  SetByGTINURL(_Configuration.ByGTINURL);
-  SetCustomerId(_Configuration.CustomerId);
-  SetRetryPolicy(_Configuration.MaxRetries,_Configuration.MaxRetryDelaySeconds);
-
+  //Die Uebernahme muss als Ganzes geschehen. Jeder einzelne Setter nimmt und
+  //gibt die Sperre selbst; ohne diese umschliessende Sperre koennte ein
+  //parallel laufender Abruf einen Zwischenstand erwischen und sich etwa mit
+  //den neuen Zugangsdaten am alten OAuth-Endpunkt anmelden. TCriticalSection
+  //laesst denselben Thread mehrfach eintreten, die Setter funktionieren also
+  //unveraendert weiter.
   FCS.Acquire;
   try
+    SetCredentials(_Configuration.Username,_Configuration.Password,
+      _Configuration.CustomerNumber,_Configuration.ClientID,
+      _Configuration.ClientSecret,_Configuration.ClientScope,
+      _Configuration.GrantType,_Configuration.DataPackagesSendMode);
+
+    SetOAuthURL(_Configuration.OAuthURL);
+    SetBySupplierPIDURL(_Configuration.BySupplierPIDURL);
+    SetByManufacturerDataURL(_Configuration.ByManufacturerDataURL);
+    SetByGTINURL(_Configuration.ByGTINURL);
+    SetCustomerId(_Configuration.CustomerId);
+    SetRetryPolicy(_Configuration.MaxRetries,_Configuration.MaxRetryDelaySeconds);
+
     //Eine leere Auswahl waere nicht abfragbar, dann gelten alle Pakete
     if _Configuration.DataPackages = [] then
       FConfiguredDataPackages := TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES
@@ -1570,7 +1595,8 @@ begin
   if Result.Success then
     Result.ErrorMessage := '';
   //Bei 950 und 951 ist der Abruf gelungen, geliefert wurde aber ein anderer
-  //Artikel. Der Statuscode bleibt darum auch im Erfolgsfall abfragbar.
+  //Artikel. Der Statuscode bleibt darum auch im Erfolgsfall abfragbar; bei
+  //einer Antwort ohne eigenen Status gilt der des Produkts.
   if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
     Result.StatusCode := Result.Product.status;
 end;

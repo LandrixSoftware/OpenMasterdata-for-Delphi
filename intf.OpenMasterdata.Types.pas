@@ -2012,18 +2012,18 @@ begin
     //Ein einzelnes Produkt ist ebenso zulaessig wie eine Liste
     if jsonValue is TJSONObject then
     begin
+      //Das Objekt bleibt bis zum geglueckten Add in eigener Hand. Danach
+      //gehoert es der Liste, und item wird geleert, damit das finally es
+      //nicht ein zweites Mal freigibt.
       item := TOpenMasterdataAPI_Result.Create;
       try
         if not item.TryLoadFromJson(_JsonValue,_Error) then
-        begin
-          item.Free;
           exit;
-        end;
-      except
+        Add(item);
+        item := nil;
+      finally
         item.Free;
-        raise;
       end;
-      Add(item);
       exit(true);
     end;
 
@@ -2048,15 +2048,15 @@ begin
       item := TOpenMasterdataAPI_Result.Create;
       try
         if item.TryLoadFromJson(element.ToJSON,itemError) then
-          Add(item)
-        else
         begin
+          Add(item);
+          //Ab hier gehoert es der Liste
+          item := nil;
+        end
+        else
           _Error := _Error+Format('Eintrag %d: %s ',[index,itemError]);
-          item.Free;
-        end;
-      except
+      finally
         item.Free;
-        raise;
       end;
     end;
 
