@@ -78,7 +78,7 @@ Da die Bibliothek künftig gegen reale Antworten statt gegen die Dokumentation a
 
 ## Tests
 
-Unter `Tests` liegt ein Konsolenprogramm mit Regressionstests für den Parser und die HTML-Ausgabe.
+Unter `Tests` liegt ein Konsolenprogramm mit Regressionstests für den Parser, die HTML-Ausgabe und den HTTP-Client. Die HTTP-Tests laufen gegen einen Server auf `127.0.0.1`, den das Testprogramm selbst startet: Anmeldung, Wiederholung bei Überlast, Statuscodes und das Verhalten zweier gleichzeitiger Abrufe auf derselben Verbindung.
 
 ```
 Tests\run-tests.bat
