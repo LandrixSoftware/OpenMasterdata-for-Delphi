@@ -246,12 +246,17 @@ type
     function SleepWithoutLock(_Milliseconds : Integer) : Boolean;
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
+    //_StatusCode und _ErrorMessage werden noch unter der Sperre eingesammelt.
+    //Wer sie erst danach ueber GetLastErrorCode liest, kann die Werte eines
+    //anderen Threads erwischen, der in der Zwischenzeit angefragt hat.
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
-      _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
+      _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+      out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource,
       _IdentifierName1, _IdentifierValue1, _IdentifierName2, _IdentifierValue2,
       _IdentifierName3, _IdentifierValue3 : String; _DataPackages : TOpenMasterdataAPI_DataPackages;
-      out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
+      out _Result: TOpenMasterdataAPI_Result;
+      out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
   public
     constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode);
     destructor Destroy; override;
@@ -1323,41 +1328,56 @@ end;
 function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
+  //Status und Meldung bleiben hier ueber GetLastErrorCode abfragbar, wie
+  //bisher. Eindeutig sind sie nur in FetchBySupplierPid.
   Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(epBySupplierPid),
-    'supplierPid',_SupplierPid,_DataPackages,_Result);
+    'supplierPid',_SupplierPid,_DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
   _ManufacturerIdType, _ManufacturerPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
   Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(epByManufacturerData),
     'manufacturerId',_ManufacturerId,
     'manufacturerIdType',_ManufacturerIdType,
     'manufacturerPid',_ManufacturerPid,
-    _DataPackages,_Result);
+    _DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.GetByGTIN(_GTIN: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
-  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,_DataPackages,_Result);
+  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+    _DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
   const _Resource, _IdentifierName, _IdentifierValue : String;
-  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+  out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
 begin
-  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,'','','','',_DataPackages,_Result);
+  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,
+              '','','','',_DataPackages,_Result,_StatusCode,_ErrorMessage);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
   const _Resource, _IdentifierName1, _IdentifierValue1, _IdentifierName2,
   _IdentifierValue2, _IdentifierName3, _IdentifierValue3 : String;
-  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+  out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
@@ -1482,6 +1502,11 @@ begin
   end;
 
   finally
+    //Noch unter der Sperre: danach koennte ein anderer Thread die Felder
+    //bereits mit seinem eigenen Ergebnis ueberschrieben haben. Das finally
+    //laeuft auch bei jedem vorzeitigen exit.
+    _StatusCode := FLastErrorCode;
+    _ErrorMessage := FLastErrorMessage;
     FCS.Release;
   end;
 end;
@@ -1535,10 +1560,15 @@ function TOpenMasterdataApiClient.FetchBySupplierPid(const _SupplierPid : String
   _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
 begin
   Result := Default(TOpenMasterdataResponse);
-  Result.Success := GetBySupplierPid(_SupplierPid,_DataPackages,Result.Product);
-  Result.StatusCode := GetLastErrorCode;
-  if not Result.Success then
-    Result.ErrorMessage := GetLastErrorMessage;
+  //Status und Meldung kommen aus dem Abruf selbst, noch unter dessen Sperre
+  //eingesammelt. Ueber GetLastErrorCode gelesen koennten sie von einem
+  //anderen Thread stammen.
+  Result.Success := ExecuteProductRequest(FRESTClientBySupplierPID,
+                      ReadEndpointUrl(epBySupplierPid),'supplierPid',_SupplierPid,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
   //Bei 950 und 951 ist der Abruf gelungen, geliefert wurde aber ein anderer
   //Artikel. Der Statuscode bleibt darum auch im Erfolgsfall abfragbar.
   if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
@@ -1555,10 +1585,12 @@ function TOpenMasterdataApiClient.FetchByGTIN(const _GTIN : String;
   _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
 begin
   Result := Default(TOpenMasterdataResponse);
-  Result.Success := GetByGTIN(_GTIN,_DataPackages,Result.Product);
-  Result.StatusCode := GetLastErrorCode;
-  if not Result.Success then
-    Result.ErrorMessage := GetLastErrorMessage;
+  Result.Success := ExecuteProductRequest(FRESTClientByGTIN,
+                      ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
   if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
     Result.StatusCode := Result.Product.status;
 end;
@@ -1575,11 +1607,15 @@ function TOpenMasterdataApiClient.FetchByManufacturerData(const _ManufacturerId,
   _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
 begin
   Result := Default(TOpenMasterdataResponse);
-  Result.Success := GetByManufacturerData(_ManufacturerId,_ManufacturerIdType,
-                      _ManufacturerPid,_DataPackages,Result.Product);
-  Result.StatusCode := GetLastErrorCode;
-  if not Result.Success then
-    Result.ErrorMessage := GetLastErrorMessage;
+  Result.Success := ExecuteProductRequest(FRESTClientByManufacturerData,
+                      ReadEndpointUrl(epByManufacturerData),
+                      'manufacturerId',_ManufacturerId,
+                      'manufacturerIdType',_ManufacturerIdType,
+                      'manufacturerPid',_ManufacturerPid,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
   if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
     Result.StatusCode := Result.Product.status;
 end;
