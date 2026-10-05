@@ -22,12 +22,13 @@ specific language governing permissions and limitations
 under the License.
 }
 
-//Regressionstests fuer den JSON-Parser.
+//Regressionstests fuer den JSON-Parser, die HTML-Ausgabe und den HTTP-Client.
 //
 //Aufruf:   OpenMasterdataTests.exe [Pfad zum Ordner Testresponses]
 //Rueckgabe: Exitcode 0 = alle Tests bestanden, 1 = mindestens ein Test fehlgeschlagen.
 //
-//Die Tests in RunParserTests laufen ohne externe Daten. Ist zusaetzlich der Ordner
+//Die Tests laufen ohne Netzwerk. Die HTTP-Tests sprechen mit einer Gegenstelle
+//auf 127.0.0.1 (OpenMasterdataTests.StubServer). Ist zusaetzlich der Ordner
 //Testresponses vorhanden, wird jede dort abgelegte Lieferanten-Antwort als Smoketest geparst.
 
 program OpenMasterdataTests;
@@ -41,9 +42,11 @@ uses
   System.StrUtils,
   System.DateUtils,
   System.IniFiles,
+  System.SyncObjs,
   intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
-  intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas';
+  intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas',
+  OpenMasterdataTests.StubServer in 'OpenMasterdataTests.StubServer.pas';
 
 var
   TestsRun : Integer = 0;
@@ -1748,6 +1751,499 @@ begin
   Writeln;
 end;
 
+//---------------------------------------------------------------------------
+//Tests gegen eine HTTP-Gegenstelle auf 127.0.0.1
+//
+//Sie decken ab, was sich am Code allein nicht pruefen laesst: Anmeldung,
+//Wiederholung und vor allem das Zusammenspiel zweier Abrufe auf derselben
+//Verbindung, waehrend einer davon ohne Sperre auf seinen Wiederholversuch
+//wartet.
+//---------------------------------------------------------------------------
+
+const
+  CStubTokenResponse = '{"access_token":"tok-1","token_type":"bearer","expires_in":3600}';
+  CStubOAuthPath = '/oauth/token';
+  CStubProductPath = '/product/bysupplierpid';
+
+function StubProduct(const _Pid : String) : String;
+begin
+  Result := '{"supplierPid":"'+_Pid+'","basic":{"productShortDescr":"Artikel '+_Pid+'"}}';
+end;
+
+function CreateStubClient(_Server : TStubServer; _MaxRetries : Integer) : IOpenMasterdataApiClient;
+var
+  configuration : TOpenMasterdataConfiguration;
+begin
+  configuration := TOpenMasterdataConfiguration.Defaults;
+  configuration.Username := 'user';
+  configuration.Password := 'pass';
+  configuration.OAuthURL := _Server.Url(CStubOAuthPath);
+  configuration.BySupplierPIDURL := _Server.Url(CStubProductPath);
+  configuration.MaxRetries := _MaxRetries;
+  configuration.MaxRetryDelaySeconds := 5;
+  //Direkt erzeugt, nicht ueber die Verbindungsliste: jeder Test bekommt
+  //seinen eigenen Client, die Referenzzaehlung gibt ihn frei
+  Result := TOpenMasterdataApiClient.Create('stub',configuration.Username,
+    configuration.Password,'','','','',configuration.GrantType,
+    configuration.DataPackagesSendMode);
+  Result.ApplyConfiguration(configuration);
+end;
+
+//Position der ersten Anfrage an den Artikelendpunkt, deren Query _QueryPart
+//enthaelt, ab _Start. -1, wenn keine.
+function StubRequestIndex(_Server : TStubServer; const _QueryPart : String;
+  _Start : Integer = 0) : Integer;
+var
+  requests : TArray<TStubRequest>;
+  i : Integer;
+begin
+  Result := -1;
+  requests := _Server.Requests;
+  for i := _Start to High(requests) do
+    if SameText(requests[i].Path,CStubProductPath) and
+       (Pos(_QueryPart,requests[i].Query) > 0) then
+      exit(i);
+end;
+
+type
+  //Fuehrt einen Abruf in einem eigenen Thread aus. Das Produkt gibt der Test frei.
+  TStubFetchThread = class(TThread)
+  private
+    FClient : IOpenMasterdataApiClient;
+    FPid : String;
+  protected
+    procedure Execute; override;
+  public
+    Response : TOpenMasterdataResponse;
+    constructor Create(const _Client : IOpenMasterdataApiClient; const _Pid : String);
+  end;
+
+constructor TStubFetchThread.Create(const _Client : IOpenMasterdataApiClient; const _Pid : String);
+begin
+  FClient := _Client;
+  FPid := _Pid;
+  inherited Create(false);
+end;
+
+procedure TStubFetchThread.Execute;
+begin
+  Response := FClient.FetchBySupplierPid(FPid);
+end;
+
+procedure TestStubFetch;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  requests : TArray<TStubRequest>;
+  loginsBefore : Integer;
+begin
+  Writeln('HTTP: Anmeldung und Abruf');
+
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      if Pos('supplierPid=OK',_Request.Query) > 0 then
+        exit(TStubReply.Make(200,StubProduct('OK')));
+      if Pos('supplierPid=ALT',_Request.Query) > 0 then
+        exit(TStubReply.Make(COpenMasterdataStatusAlternativeProduct,StubProduct('ALT-ERSATZ')));
+      Result := TStubReply.Make(404,'{"error":"not found"}');
+    end);
+  try
+    client := CreateStubClient(server,0);
+
+    response := client.FetchBySupplierPid('OK');
+    try
+      Check('Abruf gelingt',response.Success,response.ErrorMessage);
+      CheckEqualsInt('Status 200',200,response.StatusCode);
+      CheckEqualsStr('keine Meldung','',response.ErrorMessage);
+      Check('Produkt geliefert',Assigned(response.Product));
+      if Assigned(response.Product) then
+        CheckEqualsStr('richtiges Produkt','OK',response.Product.supplierPid);
+    finally
+      response.Product.Free;
+    end;
+
+    requests := server.Requests;
+    CheckEqualsInt('Anmeldung und Abruf',2,Length(requests));
+    if Length(requests) = 2 then
+    begin
+      CheckEqualsStr('zuerst die Anmeldung',CStubOAuthPath,requests[0].Path);
+      Check('Anmeldung als POST',SameText(requests[0].Method,'POST'),requests[0].Method);
+      Check('Grant-Type gesendet',Pos('grant_type=password',requests[0].Body) > 0,requests[0].Body);
+      Check('Benutzer gesendet',Pos('username=user',requests[0].Body) > 0,requests[0].Body);
+      CheckEqualsStr('Token im Abruf','Bearer tok-1',requests[1].Authorization);
+      Check('Datenpakete im Abruf',Pos('datapackage=',requests[1].Query) > 0,requests[1].Query);
+    end;
+
+    response := client.FetchBySupplierPid('FEHLT');
+    try
+      Check('nicht gefunden ist kein Erfolg',not response.Success);
+      CheckEqualsInt('Status 404',404,response.StatusCode);
+      Check('Meldung nennt den Grund',Pos('nicht gefunden',response.ErrorMessage) > 0,response.ErrorMessage);
+      Check('kein Produkt',response.Product = nil);
+    finally
+      response.Product.Free;
+    end;
+
+    response := client.FetchBySupplierPid('ALT');
+    try
+      Check('Alternativartikel ist ein Erfolg',response.Success,response.ErrorMessage);
+      CheckEqualsInt('Status 950',COpenMasterdataStatusAlternativeProduct,response.StatusCode);
+      Check('als Alternative erkennbar',response.IsAlternativeProduct);
+      if Assigned(response.Product) then
+        CheckEqualsStr('das Ersatzprodukt','ALT-ERSATZ',response.Product.supplierPid);
+    finally
+      response.Product.Free;
+    end;
+
+    CheckEqualsInt('Token wird wiederverwendet',1,server.RequestCount(CStubOAuthPath));
+
+    //Ein 401 verwirft den Token, der naechste Abruf meldet sich neu an
+    loginsBefore := server.RequestCount(CStubOAuthPath);
+    server.Free;
+    server := nil;
+    server := TStubServer.Create(
+      function(const _Request : TStubRequest) : TStubReply
+      begin
+        if _Request.Path = CStubOAuthPath then
+          exit(TStubReply.Make(200,CStubTokenResponse));
+        Result := TStubReply.Make(401,'{"error":"invalid_token"}');
+      end);
+    client := CreateStubClient(server,0);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    CheckEqualsInt('401 gemeldet',401,response.StatusCode);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    CheckEqualsInt('nach 401 neu angemeldet',2,server.RequestCount(CStubOAuthPath));
+    Check('vorher genau eine Anmeldung',loginsBefore = 1);
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubRetry;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  flakyCalls : Integer;
+begin
+  Writeln('HTTP: Wiederholung bei Ueberlast');
+
+  flakyCalls := 0;
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      //Retry-After 0: wiederholen, ohne zu warten
+      if Pos('supplierPid=FLAKY',_Request.Query) > 0 then
+      begin
+        if TInterlocked.Increment(flakyCalls) = 1 then
+          exit(TStubReply.Make(503,'','0'));
+        exit(TStubReply.Make(200,StubProduct('FLAKY')));
+      end;
+      Result := TStubReply.Make(503,'{"error":"busy"}','0');
+    end);
+  try
+    client := CreateStubClient(server,2);
+
+    response := client.FetchBySupplierPid('FLAKY');
+    try
+      Check('gelingt im zweiten Versuch',response.Success,response.ErrorMessage);
+      CheckEqualsInt('Status des letzten Versuchs',200,response.StatusCode);
+      CheckEqualsStr('keine Meldung','',response.ErrorMessage);
+    finally
+      response.Product.Free;
+    end;
+    CheckEqualsInt('zwei Versuche',2,server.RequestCount(CStubProductPath,'FLAKY'));
+
+    response := client.FetchBySupplierPid('DOWN');
+    try
+      Check('dauerhafte Ueberlast ist kein Erfolg',not response.Success);
+      CheckEqualsInt('Status 503',503,response.StatusCode);
+      Check('Meldung vorhanden',response.ErrorMessage <> '');
+    finally
+      response.Product.Free;
+    end;
+    CheckEqualsInt('ein Versuch und zwei Wiederholungen',3,server.RequestCount(CStubProductPath,'DOWN'));
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubLoginFailure;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  oauthReply : String;
+  oauthStatus : Integer;
+begin
+  Writeln('HTTP: gescheiterte Anmeldung');
+
+  oauthStatus := 400;
+  oauthReply := '{"error":"invalid_grant","error_description":"Benutzer oder Passwort falsch"}';
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(oauthStatus,oauthReply));
+      Result := TStubReply.Make(200,StubProduct('OK'));
+    end);
+  try
+    client := CreateStubClient(server,0);
+
+    response := client.FetchBySupplierPid('OK');
+    try
+      Check('abgelehnte Anmeldung ist kein Erfolg',not response.Success);
+      //Es gab keinen Produktabruf, also auch keinen Produktstatus
+      CheckEqualsInt('kein Produktstatus',0,response.StatusCode);
+      Check('Begruendung des Servers',Pos('Passwort falsch',response.ErrorMessage) > 0,response.ErrorMessage);
+    finally
+      response.Product.Free;
+    end;
+
+    //Status 200, aber kein Token
+    oauthStatus := 200;
+    oauthReply := '{"token_type":"bearer"}';
+    response := client.FetchBySupplierPid('OK');
+    try
+      Check('Antwort ohne Token ist kein Erfolg',not response.Success);
+      CheckEqualsInt('auch hier kein Produktstatus',0,response.StatusCode);
+      Check('Meldung vorhanden',response.ErrorMessage <> '');
+    finally
+      response.Product.Free;
+    end;
+
+    CheckEqualsInt('kein Produktabruf ohne Anmeldung',0,server.RequestCount(CStubProductPath));
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+//Abruf A wartet ohne Sperre auf seinen Wiederholversuch, Abruf B laeuft auf
+//derselben Verbindung in die Luecke und hinterlaesst 404 in den geteilten
+//Feldern. A muss trotzdem seinen eigenen Status melden.
+procedure TestStubConcurrentRetry;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  waiting : TEvent;
+  thread : TStubFetchThread;
+  responseB : TOpenMasterdataResponse;
+  slowCalls : Integer;
+  firstSlow, indexB : Integer;
+begin
+  Writeln('HTTP: zweiter Abruf waehrend der Wartezeit des ersten');
+
+  slowCalls := 0;
+  waiting := TEvent.Create(nil,true,false,'');
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      //SLOW: zuerst 503 mit einer Sekunde Wartezeit, dann der Artikel
+      if Pos('supplierPid=SLOW',_Request.Query) > 0 then
+      begin
+        if TInterlocked.Increment(slowCalls) = 1 then
+        begin
+          waiting.SetEvent;
+          exit(TStubReply.Make(503,'','1'));
+        end;
+        exit(TStubReply.Make(200,StubProduct('SLOW')));
+      end;
+      //STUCK: immer 503 mit einer Sekunde Wartezeit
+      if Pos('supplierPid=STUCK',_Request.Query) > 0 then
+      begin
+        waiting.SetEvent;
+        exit(TStubReply.Make(503,'{"error":"busy"}','1'));
+      end;
+      Result := TStubReply.Make(404,'{"error":"not found"}');
+    end);
+  try
+    client := CreateStubClient(server,1);
+
+    //A gelingt im zweiten Versuch
+    thread := TStubFetchThread.Create(client,'SLOW');
+    try
+      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
+      responseB := client.FetchBySupplierPid('FEHLT');
+      responseB.Product.Free;
+      thread.WaitFor;
+
+      firstSlow := StubRequestIndex(server,'supplierPid=SLOW');
+      indexB := StubRequestIndex(server,'supplierPid=FEHLT');
+      //Sonst hat der Test die Luecke gar nicht getroffen
+      Check('B lief zwischen den Versuchen von A',
+        (firstSlow >= 0) and (indexB > firstSlow) and
+        (StubRequestIndex(server,'supplierPid=SLOW',indexB) > indexB));
+
+      CheckEqualsInt('B meldet 404',404,responseB.StatusCode);
+      Check('A gelingt',thread.Response.Success,thread.Response.ErrorMessage);
+      CheckEqualsInt('A meldet seinen eigenen Status',200,thread.Response.StatusCode);
+      CheckEqualsStr('A hat keine fremde Meldung','',thread.Response.ErrorMessage);
+    finally
+      thread.Response.Product.Free;
+      thread.Free;
+    end;
+
+    //A scheitert endgueltig, B liefert in der Luecke 404
+    waiting.ResetEvent;
+    thread := TStubFetchThread.Create(client,'STUCK');
+    try
+      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
+      responseB := client.FetchBySupplierPid('FEHLT');
+      responseB.Product.Free;
+      thread.WaitFor;
+
+      CheckEqualsInt('zwei Versuche von A',2,server.RequestCount(CStubProductPath,'supplierPid=STUCK'));
+      Check('A scheitert',not thread.Response.Success);
+      CheckEqualsInt('A meldet 503, nicht das 404 von B',503,thread.Response.StatusCode);
+      Check('A meldet die eigene Meldung, nicht die von B',
+        (thread.Response.ErrorMessage <> '') and
+        (Pos('nicht gefunden',thread.Response.ErrorMessage) = 0),
+        thread.Response.ErrorMessage);
+    finally
+      thread.Response.Product.Free;
+      thread.Free;
+    end;
+  finally
+    client := nil;
+    server.Free;
+    waiting.Free;
+  end;
+end;
+
+//Aendert sich waehrend der Wartezeit der Endpunkt, darf der vorbereitete
+//Request samt Token nicht an die neue Adresse gehen.
+procedure TestStubConfigChangeDuringWait;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  waiting : TEvent;
+  thread : TStubFetchThread;
+begin
+  Writeln('HTTP: Konfiguration aendert sich waehrend der Wartezeit');
+
+  waiting := TEvent.Create(nil,true,false,'');
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      if _Request.Path = CStubProductPath then
+      begin
+        waiting.SetEvent;
+        exit(TStubReply.Make(503,'','1'));
+      end;
+      Result := TStubReply.Make(200,StubProduct('ANDERS'));
+    end);
+  try
+    client := CreateStubClient(server,1);
+
+    thread := TStubFetchThread.Create(client,'X');
+    try
+      Check('A erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
+      client.SetBySupplierPIDURL(server.Url('/anderer/endpunkt'));
+      thread.WaitFor;
+
+      Check('Abruf wird abgebrochen',not thread.Response.Success);
+      CheckEqualsInt('Status des letzten Versuchs',503,thread.Response.StatusCode);
+      Check('Meldung nennt den Grund',Pos('Konfiguration',thread.Response.ErrorMessage) > 0,
+        thread.Response.ErrorMessage);
+      CheckEqualsInt('nur ein Versuch am alten Endpunkt',1,server.RequestCount(CStubProductPath));
+      CheckEqualsInt('nichts an den neuen Endpunkt',0,server.RequestCount('/anderer/endpunkt'));
+    finally
+      thread.Response.Product.Free;
+      thread.Free;
+    end;
+  finally
+    client := nil;
+    server.Free;
+    waiting.Free;
+  end;
+end;
+
+//Zwei Threads legen gleichzeitig eine Verbindung desselben Namens an. Es darf
+//nur eine entstehen, und beide muessen sie erhalten.
+procedure TestConcurrentConnectionCreation;
+const
+  CRounds = 50;
+var
+  pass : Integer;
+  name : String;
+  configurationA, configurationB : TOpenMasterdataConfiguration;
+  connectionA, connectionB, registered : IOpenMasterdataApiClient;
+  threadA, threadB : TThread;
+  start : TEvent;
+  distinct : Integer;
+begin
+  Writeln('Gleichzeitiges Anlegen einer Verbindung');
+
+  configurationA := TOpenMasterdataConfiguration.Defaults;
+  configurationA.OAuthURL := 'https://a.example/oauth';
+  configurationA.BySupplierPIDURL := 'https://a.example/product';
+  configurationB := TOpenMasterdataConfiguration.Defaults;
+  configurationB.OAuthURL := 'https://b.example/oauth';
+  configurationB.BySupplierPIDURL := 'https://b.example/product';
+
+  distinct := 0;
+  start := TEvent.Create(nil,true,false,'');
+  try
+    for pass := 1 to CRounds do
+    begin
+      name := 'race-'+IntToStr(pass);
+      start.ResetEvent;
+      connectionA := nil;
+      connectionB := nil;
+      threadA := TThread.CreateAnonymousThread(
+        procedure
+        begin
+          start.WaitFor(5000);
+          connectionA := TOpenMasterdataApiClient.NewOpenMasterdataConnection(name,configurationA);
+        end);
+      threadB := TThread.CreateAnonymousThread(
+        procedure
+        begin
+          start.WaitFor(5000);
+          connectionB := TOpenMasterdataApiClient.NewOpenMasterdataConnection(name,configurationB);
+        end);
+      threadA.FreeOnTerminate := false;
+      threadB.FreeOnTerminate := false;
+      try
+        threadA.Start;
+        threadB.Start;
+        start.SetEvent;
+        threadA.WaitFor;
+        threadB.WaitFor;
+      finally
+        threadA.Free;
+        threadB.Free;
+      end;
+
+      if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(name,registered) or
+         (connectionA <> registered) or (connectionB <> registered) then
+        Inc(distinct);
+      registered := nil;
+      connectionA := nil;
+      connectionB := nil;
+      TOpenMasterdataApiClient.RemoveOpenMasterdataConnection(name);
+    end;
+  finally
+    start.Free;
+  end;
+  CheckEqualsInt('immer genau eine Verbindung je Name',0,distinct);
+end;
+
 function LocateTestresponses : String;
 var
   candidate : String;
@@ -1841,6 +2337,18 @@ begin
     TestProductStatus;
     Writeln;
     TestResultList;
+    Writeln;
+    TestStubFetch;
+    Writeln;
+    TestStubRetry;
+    Writeln;
+    TestStubLoginFailure;
+    Writeln;
+    TestStubConcurrentRetry;
+    Writeln;
+    TestStubConfigChangeDuringWait;
+    Writeln;
+    TestConcurrentConnectionCreation;
     Writeln;
 
     if ParamCount > 0 then

@@ -1,5 +1,5 @@
 @echo off
-rem Baut die Parsertests und fuehrt sie aus.
+rem Baut die Tests und fuehrt sie aus.
 rem Voraussetzung: eine installierte Delphi-Version. Der Pfad wird ueber
 rem rsvars.bat aus der Umgebung gesucht, notfalls BDS setzen.
 
