@@ -1,7 +1,7 @@
 ﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{3972419D-CF6D-415D-BE30-6C8E7969A200}</ProjectGuid>
-        <ProjectVersion>20.3</ProjectVersion>
+        <ProjectVersion>20.5</ProjectVersion>
         <FrameworkType>VCL</FrameworkType>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
@@ -824,6 +824,9 @@ $(PostBuildEvent)]]></PostBuildEvent>
                     <Platform Name="Win64x">
                         <Operation>1</Operation>
                     </Platform>
+                    <Platform Name="WinARM64EC">
+                        <Operation>1</Operation>
+                    </Platform>
                 </DeployClass>
                 <DeployClass Name="ProjectiOSDeviceDebug">
                     <Platform Name="iOSDevice32">
@@ -894,6 +897,10 @@ $(PostBuildEvent)]]></PostBuildEvent>
                         <RemoteDir>Assets</RemoteDir>
                         <Operation>1</Operation>
                     </Platform>
+                    <Platform Name="WinARM64EC">
+                        <RemoteDir>Assets</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
                 </DeployClass>
                 <DeployClass Name="UWP_DelphiLogo44">
                     <Platform Name="Win32">
@@ -901,6 +908,10 @@ $(PostBuildEvent)]]></PostBuildEvent>
                         <Operation>1</Operation>
                     </Platform>
                     <Platform Name="Win64">
+                        <RemoteDir>Assets</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="WinARM64EC">
                         <RemoteDir>Assets</RemoteDir>
                         <Operation>1</Operation>
                     </Platform>
@@ -1118,6 +1129,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
                 <ProjectRoot Platform="Win32" Name="$(PROJECTNAME)"/>
                 <ProjectRoot Platform="Win64" Name="$(PROJECTNAME)"/>
                 <ProjectRoot Platform="Win64x" Name="$(PROJECTNAME)"/>
+                <ProjectRoot Platform="WinARM64EC" Name="$(PROJECTNAME)"/>
             </Deployment>
             <Platforms>
                 <Platform value="Win32">True</Platform>
@@ -1134,7 +1146,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>if exist "$(BDS)\Redist\win32\WebView2Loader.dll" copy /y "$(BDS)\Redist\win32\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
+        <PostBuildEvent>if exist &quot;$(BDS)\Redist\win32\WebView2Loader.dll&quot; copy /y &quot;$(BDS)\Redist\win32\WebView2Loader.dll&quot; &quot;$(OUTPUTDIR)&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
@@ -1142,7 +1154,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>if exist "$(BDS)\Redist\win64\WebView2Loader.dll" copy /y "$(BDS)\Redist\win64\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
+        <PostBuildEvent>if exist &quot;$(BDS)\Redist\win64\WebView2Loader.dll&quot; copy /y &quot;$(BDS)\Redist\win64\WebView2Loader.dll&quot; &quot;$(OUTPUTDIR)&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win32'">
@@ -1150,7 +1162,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>if exist "$(BDS)\Redist\win32\WebView2Loader.dll" copy /y "$(BDS)\Redist\win32\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
+        <PostBuildEvent>if exist &quot;$(BDS)\Redist\win32\WebView2Loader.dll&quot; copy /y &quot;$(BDS)\Redist\win32\WebView2Loader.dll&quot; &quot;$(OUTPUTDIR)&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
@@ -1158,7 +1170,7 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PreLinkEvent/>
         <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>if exist "$(BDS)\Redist\win64\WebView2Loader.dll" copy /y "$(BDS)\Redist\win64\WebView2Loader.dll" "$(OUTPUTDIR)"</PostBuildEvent>
+        <PostBuildEvent>if exist &quot;$(BDS)\Redist\win64\WebView2Loader.dll&quot; copy /y &quot;$(BDS)\Redist\win64\WebView2Loader.dll&quot; &quot;$(OUTPUTDIR)&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>True</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
 </Project>

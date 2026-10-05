@@ -73,8 +73,6 @@ type
     //Die Kundennummer gehoert nur dann in die Zugangsdaten, wenn der
     //Lieferant sie verlangt. Sonst haengt die Bibliothek sie an den
     //Benutzernamen an und der Login schlaegt fehl.
-    function ConfiguredFlag(const _Section,_Key : String; _Default : Boolean) : Boolean;
-    function ConfiguredCustomerNumber(const _Section : String) : String;
     //Setzt die Haken der Datenpaketliste nach der Konfiguration
     procedure ApplyConfiguredDataPackages(const _Section : String);
     procedure SetAuthorizationTarget(const _URL : String);
@@ -185,23 +183,12 @@ begin
   if ListBox2.ItemIndex < 0 then
     exit;
 
+  //Die Bibliothek liest den Ini-Abschnitt selbst: Zugangsdaten, Adressen,
+  //Datenpakete und Wiederholungsstrategie in einem Aufruf. Damit gilt fuer
+  //jede Anwendung dieselbe Auslegung der Schluessel.
   if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
-  begin
-    var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
-    var dpsm : TOpenMasterdataApiClient.TDataPackagesSendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
-
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
-               Configuration.ReadString(ComboBox1.Text,'Username',''),
-               Configuration.ReadString(ComboBox1.Text,'Password',''),
-               ConfiguredCustomerNumber(ComboBox1.Text),
-               Configuration.ReadString(ComboBox1.Text,'ClientID',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
-    client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
-    client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
-    //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
-    //client.SetByGTINURL(Configuration.ReadString(ComboBox1.Text,'ByGTINURL',''));
-  end;
+                Configuration,ComboBox1.Text);
 
   if client.GetData(ListBox2.Items[ListBox2.ItemIndex],data) then
   try
@@ -266,37 +253,6 @@ begin
     profile.Set_PreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT);
 end;
 
-//Liest einen Ja-Nein-Schluessel. StrToBoolDef versteht nur True, False und
-//Zahlen; in Konfigurationen und in der Lieferantentabelle der Dokumentation
-//steht aber auch ja und nein. Ein nicht erkannter Wert wuerde stillschweigend
-//zur Vorgabe, was hier das Gegenteil des Gemeinten bedeuten kann.
-function TMainForm.ConfiguredFlag(const _Section,_Key : String;
-  _Default : Boolean) : Boolean;
-var
-  configuredValue : String;
-begin
-  configuredValue := Trim(Configuration.ReadString(_Section,_Key,''));
-  if configuredValue = '' then
-    exit(_Default);
-  if MatchText(configuredValue,['true','ja','yes','y','j','1','-1']) then
-    exit(true);
-  if MatchText(configuredValue,['false','nein','no','n','0']) then
-    exit(false);
-  Result := _Default;
-end;
-
-function TMainForm.ConfiguredCustomerNumber(const _Section : String) : String;
-begin
-  //CustomernumberRequired steuert, ob der Lieferant die Kundennummer als
-  //Teil der Anmeldung erwartet. Steht in der Konfiguration eine Nummer,
-  //die der Lieferant nicht verlangt, wuerde sie den Benutzernamen
-  //verfaelschen.
-  //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten.
-  if not ConfiguredFlag(_Section,'CustomernumberRequired',true) then
-    exit('');
-  Result := Configuration.ReadString(_Section,'Customernumber','');
-end;
-
 procedure TMainForm.ApplyConfiguredDataPackages(const _Section : String);
 var
   packages : TOpenMasterdataAPI_DataPackages;
@@ -306,11 +262,9 @@ var
 begin
   unknownNames := TStringList.Create;
   try
-    //Ohne den Schluessel bleibt es bei allen Paketen
-    packages := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
-                  Configuration.ReadString(_Section,'DataPackages',''),
-                  TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES,
-                  unknownNames);
+    //Dieselbe Auslegung wie beim Verbindungsaufbau
+    packages := TOpenMasterdataConfiguration.LoadFromIni(Configuration,_Section,
+                  unknownNames).DataPackages;
 
     for i := 0 to CheckListBox1.Items.Count-1 do
       if TOpenMasterdataAPI_DataPackageHelper.TryDataPackageFromString(
@@ -446,23 +400,12 @@ begin
   if ListBox1.ItemIndex < 0 then
     exit;
 
+  //Die Bibliothek liest den Ini-Abschnitt selbst: Zugangsdaten, Adressen,
+  //Datenpakete und Wiederholungsstrategie in einem Aufruf. Damit gilt fuer
+  //jede Anwendung dieselbe Auslegung der Schluessel.
   if not TOpenMasterdataApiClient.GetOpenMasterdataConnection(ComboBox1.Text,client) then
-  begin
-    var gt : TOpenMasterdataApiClient.TGrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(Configuration.ReadString(ComboBox1.Text,'GrantType',''));
-    var dpsm : TOpenMasterdataApiClient.TDataPackagesSendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(Configuration.ReadString(ComboBox1.Text,'DataPackageSendMode',''));
-
     client := TOpenMasterdataApiClient.NewOpenMasterdataConnection(ComboBox1.Text,
-               Configuration.ReadString(ComboBox1.Text,'Username',''),
-               Configuration.ReadString(ComboBox1.Text,'Password',''),
-               ConfiguredCustomerNumber(ComboBox1.Text),
-               Configuration.ReadString(ComboBox1.Text,'ClientID',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientSecret',''),
-               Configuration.ReadString(ComboBox1.Text,'ClientScope',''),gt,dpsm);
-    client.SetOAuthURL(Configuration.ReadString(ComboBox1.Text,'OAuthURL',''));
-    client.SetBySupplierPIDURL(Configuration.ReadString(ComboBox1.Text,'BySupplierPIDURL',''));
-    //client.SetByManufacturerDataURL(Configuration.ReadString(ComboBox1.Text,'ByManufacturerDataURL',''));
-    //client.SetByGTINURL(Configuration.ReadString(ComboBox1.Text,'ByGTINURL',''));
-  end;
+                Configuration,ComboBox1.Text);
 
   dataPackages := [];
   for var iDataPackage : TOpenMasterdataAPI_DataPackage := Low(TOpenMasterdataAPI_DataPackage) to High(TOpenMasterdataAPI_DataPackage) do

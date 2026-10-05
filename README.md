@@ -88,6 +88,82 @@ Das Skript sucht eine installierte Delphi-Version, kompiliert die Tests und füh
 
 Neue Beispiel-Responses lassen sich damit direkt gegen die vorhandene Parserlogik prüfen.
 
+## Verbindung aufbauen
+
+Eine Verbindung lässt sich auf drei Wegen anlegen. Am kürzesten direkt aus einem Abschnitt einer Ini-Datei:
+
+```pascal
+client := TOpenMasterdataApiClient.NewOpenMasterdataConnection('Mainmetall',
+            Configuration,'MAINMETALL Grosshandelsgesellschaft m.b.H.');
+```
+
+Damit liest die Bibliothek Zugangsdaten, Adressen, Datenpaketauswahl und Wiederholungsstrategie selbst — einschließlich der Regel, dass die Kundennummer nur bei `CustomernumberRequired=True` in die Anmeldung geht. Zuvor legte jede Anwendung die Schlüssel selbst aus, was leicht auseinanderläuft.
+
+Wer die Werte anderswoher bezieht, füllt den Record selbst:
+
+```pascal
+var configuration := TOpenMasterdataConfiguration.Defaults;
+configuration.Username := '…';
+configuration.Password := '…';
+configuration.ClientID := '…';
+configuration.OAuthURL := '…';
+configuration.BySupplierPIDURL := '…';
+configuration.DataPackages := [omd_datapackage_basic,omd_datapackage_prices];
+
+client := TOpenMasterdataApiClient.NewOpenMasterdataConnection('Name',configuration);
+```
+
+Die bisherige Überladung mit den einzelnen Parametern bleibt unverändert bestehen.
+
+## Abruf und Ergebnis
+
+Neben den `Get…`-Funktionen mit `out`-Parameter gibt es `Fetch…`, das Ergebnis, Status und Meldung in einem Wert liefert:
+
+```pascal
+var response := client.FetchBySupplierPid('BOGPRP90II15');
+try
+  if not response.Success then
+    ZeigeFehler(response.ErrorMessage)
+  else
+  begin
+    //Der Abruf kann gelingen und trotzdem einen anderen Artikel liefern
+    if response.StatusHint <> '' then
+      ZeigeHinweis(response.StatusHint);
+    Verarbeite(response.Product);
+  end;
+finally
+  response.Product.Free;
+end;
+```
+
+Ohne Angabe der Datenpakete gilt die Auswahl aus der Konfiguration. `response.Product` gehört dem Aufrufer.
+
+Zu den Statuswerten 950 und 951 liefert der Server ein vollständiges Produkt — aber nicht das angefragte, sondern einen Alternativ- oder Nachfolgeartikel. Das ließ sich bisher nur über `GetLastErrorCode` erkennen. Jetzt trägt die Bibliothek den Status in das Ergebnis ein, sofern die Antwort selbst keinen führt, und `TOpenMasterdataAPI_Result` beantwortet die Frage direkt:
+
+```pascal
+if result.IsAlternativeProduct then …
+if result.IsSuccessorProduct then …
+if result.IsInactiveProduct then …
+if result.IsRequestedProduct then …   //genau der angefragte Artikel
+```
+
+## Katalogantworten mit mehreren Produkten
+
+Das Schema „Open Masterdata asynchron" (OM 11) liefert ein Array von Produkten statt eines einzelnen Objekts. `TOpenMasterdataAPI_ResultList` liest beides:
+
+```pascal
+var liste := TOpenMasterdataAPI_ResultList.Create(true);
+try
+  if liste.TryLoadFromJson(inhalt,fehler) then
+    for var produkt in liste do
+      Verarbeite(produkt);
+finally
+  liste.Free;
+end;
+```
+
+Ein unbrauchbarer Eintrag verwirft nicht die ganze Liste; er wird übergangen und im Fehlertext genannt. Die Endpunkte dafür bieten die Lieferanten derzeit noch nicht an — der Parser steht bereit, sobald sie es tun.
+
 ## Zugänge prüfen
 
 Die Tests unter `Tests` arbeiten ohne Netzwerk. Ob die hinterlegten Zugänge noch gelten, prüft ein zweites Konsolenprogramm:
@@ -153,8 +229,9 @@ In der Konfiguration sind `True`/`False` die üblichen Werte; `ja`/`nein` werden
 | Friedrich Lange GmbH | ja | password | pipedelimited | ja | ja | ja |
 | Sonepar | ja | password | exploded | ja | ja | nein |
 | Richter+Frenzel | ja | password | pipedelimited | ja | nein | ja |
-| Reisser AG| ja | password | pipedelimited | ja | ja | nein |
-| Viessmann| ja | password | pipedelimited | ja | Nein | Ja |
+| Reisser AG | ja | password | pipedelimited | ja | ja | nein |
+| Viessmann | ja | password | pipedelimited | ja | nein | ja |
+| Deinzer & Weyland GmbH | ja | password | pipedelimited | ja | ja | ja |
 
 # Lizenz / License
 
@@ -193,4 +270,5 @@ Geändertes Verhalten bei gleicher Signatur:
  - `NewOpenMasterdataConnection` übernimmt bei bereits bekanntem Verbindungsnamen die übergebenen Zugangsdaten. Weichen sie ab, wird der bisherige Token verworfen.
  - `GetLastErrorCode` liefert nach einem erfolgreichen Abruf 0. Bei den Sonderstatus 950 und 951 bleibt der Statuscode erhalten, obwohl der Abruf als erfolgreich gilt.
  - `AsHtml` reicht Lieferanten-HTML nicht mehr unverändert durch. Nicht freigegebene Tags und sämtliche Attribute werden entfernt, Adressen nur mit den Schemata `http`, `https` und `mailto` verlinkt.
+ - `AsHtml` gibt zusätzlich `descriptions.marketingText` aus, sofern er nicht mit `productDescr` übereinstimmt. Einige Lieferanten führen die Beschreibung ausschließlich dort; bisher blieb sie unsichtbar. Freigegeben sind jetzt auch `u`, `i`, `h3`, `h4`, `h5` und `hr` — `h1` und `h2` bleiben der Ansicht selbst vorbehalten.
  - Fehlgeschlagene Bild- und Dokumentdownloads werden nicht mehr zwischengespeichert, sondern beim nächsten Zugriff erneut versucht.

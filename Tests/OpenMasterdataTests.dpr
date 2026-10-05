@@ -40,6 +40,7 @@ uses
   System.IOUtils,
   System.StrUtils,
   System.DateUtils,
+  System.IniFiles,
   intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
   intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas';
@@ -880,6 +881,142 @@ end;
 //Die Maskierung muss in beide Richtungen stimmen: zu wenig maskieren ist
 //gefaehrlich, zu viel zerstoert die Anzeige. Beide Tests sind deshalb positiv
 //formuliert, nicht als blosse Abwesenheitspruefung.
+//Zaehlt, wie oft ein Text vorkommt. Fuer die Frage, ob etwas doppelt in der
+//Anzeige landet, genuegt ein Vergleich auf Vorhandensein nicht.
+function OccurrenceCount(const _Needle, _Haystack : String) : Integer;
+var
+  position : Integer;
+begin
+  Result := 0;
+  if (_Needle = '') or (_Haystack = '') then
+    exit;
+  position := Pos(_Needle,_Haystack);
+  while position > 0 do
+  begin
+    Inc(Result);
+    position := PosEx(_Needle,_Haystack,position+Length(_Needle));
+  end;
+end;
+
+//Manche Lieferanten fuehren die Beschreibung ausschliesslich im Marketingtext.
+//Ohne dessen Ausgabe bliebe sie dem Anwender verborgen.
+procedure TestMarketingTextIsShown;
+var
+  res : TOpenMasterdataAPI_Result;
+  html : String;
+begin
+  Writeln('Marketingtext in der Ansicht');
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    res.descriptions.productDescr := 'Kurze Beschreibung';
+    res.descriptions.marketingText := '<u>Ausstattung</u> Dichtelemente EPDM';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('Beschreibung erscheint',ContainsText(html,'Kurze Beschreibung'),html);
+    Check('Marketingtext erscheint',ContainsText(html,'Dichtelemente EPDM'),html);
+
+    //Fuehrt ein Lieferant beide Felder gleich, soll der Text nicht doppelt
+    //in der Anzeige stehen
+    res.descriptions.productDescr := 'Derselbe Text';
+    res.descriptions.marketingText := 'Derselbe Text';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('gleicher Text erscheint nur einmal',1,
+      OccurrenceCount('Derselbe Text',html));
+
+    //Leerraum und Gross- und Kleinschreibung sind kein Unterschied
+    res.descriptions.productDescr := 'Derselbe Text';
+    res.descriptions.marketingText := '  derselbe text  ';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('nur in der Schreibweise abweichender Text erscheint einmal',1,
+      OccurrenceCount('erselbe',html));
+
+    //Ein wirklich anderer Text erscheint zusaetzlich
+    res.descriptions.productDescr := 'Beschreibung';
+    res.descriptions.marketingText := 'Beschreibung mit Zusatz';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('abweichender Text erscheint zusaetzlich',2,
+      OccurrenceCount('Beschreibung',html));
+
+    //Nur der Marketingtext, ohne Beschreibung
+    res.descriptions.productDescr := '';
+    res.descriptions.marketingText := 'Nur im Marketingtext';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    Check('Marketingtext allein erscheint',ContainsText(html,'Nur im Marketingtext'),html);
+
+    //Ein leeres Feld fuegt nichts hinzu
+    res.descriptions.productDescr := 'Beschreibung';
+    res.descriptions.marketingText := '';
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+    CheckEqualsInt('leerer Marketingtext fuegt nichts hinzu',1,
+      OccurrenceCount('Beschreibung',html));
+  finally
+    res.Free;
+  end;
+end;
+
+//Die erweiterte Positivliste. Textauszeichnung soll erhalten bleiben, alles
+//mit Wirkung weiterhin verschwinden.
+procedure TestAllowedTagsForSupplierText;
+var
+  res : TOpenMasterdataAPI_Result;
+  html : String;
+
+  function Render(const _Descr : String) : String;
+  begin
+    res.descriptions.productDescr := _Descr;
+    Result := TOpenMasterdataAPI_ViewHelper.AsHtml(res);
+  end;
+
+begin
+  Writeln('Positivliste fuer Lieferantentexte');
+
+  res := TOpenMasterdataAPI_Result.Create;
+  try
+    //Neu erlaubt
+    html := Render('<p>Text mit <u>Unterstreichung</u> und <i>Kursiv</i></p>');
+    Check('u bleibt erhalten',ContainsText(html,'<u>Unterstreichung</u>'),html);
+    Check('i bleibt erhalten',ContainsText(html,'<i>Kursiv</i>'),html);
+
+    html := Render('<h3>Ausstattung</h3><p>Dichtelemente</p>');
+    Check('h3 bleibt erhalten',ContainsText(html,'<h3>Ausstattung</h3>'),html);
+    html := Render('<h4>Technik</h4><h5>Details</h5>');
+    Check('h4 bleibt erhalten',ContainsText(html,'<h4>Technik</h4>'),html);
+    Check('h5 bleibt erhalten',ContainsText(html,'<h5>Details</h5>'),html);
+    html := Render('<p>Oben</p><hr><p>Unten</p>');
+    Check('hr bleibt erhalten',ContainsText(html,'<hr>'),html);
+
+    //Ein einzelnes erlaubtes Tag genuegt, damit der Text als HTML gilt und
+    //nicht woertlich mit maskierten Klammern erscheint
+    html := Render('<u>Ausstattung</u> Dichtelemente EPDM');
+    Check('Text wird als HTML behandelt',not ContainsText(html,'&lt;u&gt;'),html);
+    Check('Inhalt bleibt erhalten',ContainsText(html,'Dichtelemente EPDM'),html);
+
+    //h1 und h2 vergibt die Ansicht selbst fuer Artikelnummer und Kurztext,
+    //ein Lieferantentext darf sie nicht setzen
+    html := Render('<p>Text</p><h1>Fremde Ueberschrift</h1>');
+    Check('h1 wird verworfen',not ContainsText(html,'<h1>Fremde'),html);
+    Check('der Text dazu bleibt',ContainsText(html,'Fremde Ueberschrift'),html);
+
+    //Die Erweiterung darf keine Wirkung durchlassen
+    html := Render('<p>vor</p><script>alert(1)</script><p>nach</p>');
+    Check('script wird verworfen',not ContainsText(html,'<script'),html);
+    html := Render('<u onmouseover="alert(1)">Text</u>');
+    Check('Attribute werden verworfen',not ContainsText(html,'onmouseover'),html);
+    html := Render('<iframe src="https://fremd"></iframe><p>Text</p>');
+    Check('iframe wird verworfen',not ContainsText(html,'<iframe'),html);
+    html := Render('<hr onload="alert(1)">');
+    Check('Attribut an hr wird verworfen',not ContainsText(html,'onload'),html);
+
+    //Ein Tag, das kein HTML ist, wird weiterhin verworfen. Die Abbildung von
+    //bold auf b ist bewusst nicht umgesetzt.
+    html := Render('<u>A</u><bold>B</bold>');
+    Check('bold wird verworfen',not ContainsText(html,'<bold'),html);
+    Check('Text aus bold bleibt erhalten',ContainsText(html,'B'),html);
+  finally
+    res.Free;
+  end;
+end;
+
 procedure TestSanitizerEscaping;
 var
   html : String;
@@ -1142,6 +1279,243 @@ begin
   Check('Code steht in Klammern',ContainsText(msg,'(invalid_grant)'),msg);
   Check('Beschreibung folgt nach dem Doppelpunkt',
     Pos('invalid_grant',msg) < Pos('Bad credentials',msg),msg);
+end;
+
+//Die Konfiguration aus einer Ini-Datei zu lesen ist jetzt Sache der
+//Bibliothek. Vorher legte jede Anwendung die Schluessel selbst aus, und genau
+//dabei entstanden die Fehler mit der Kundennummer.
+procedure TestConfigurationFromIni;
+var
+  iniFilename : String;
+  ini : TMemIniFile;
+  configuration : TOpenMasterdataConfiguration;
+  unknownNames : TStringList;
+
+  procedure WriteIni(const _Content : String);
+  begin
+    TFile.WriteAllText(iniFilename,_Content,TEncoding.UTF8);
+    FreeAndNil(ini);
+    ini := TMemIniFile.Create(iniFilename,TEncoding.UTF8);
+  end;
+
+begin
+  Writeln('Konfiguration aus einer Ini-Datei');
+
+  iniFilename := TPath.Combine(TPath.GetTempPath,'omd-konfigurationstest.ini');
+  ini := nil;
+  unknownNames := TStringList.Create;
+  try
+    //Vollstaendiger Abschnitt
+    WriteIni('[L]'#13#10+
+             'Username=benutzer'#13#10+
+             'Password=geheim'#13#10+
+             'Customernumber=4711'#13#10+
+             'CustomernumberRequired=True'#13#10+
+             'ClientID=cid'#13#10+
+             'ClientSecret=csecret'#13#10+
+             'ClientScope=openMasterdata'#13#10+
+             'GrantType=client_credentials'#13#10+
+             'DataPackageSendMode=exploded'#13#10+
+             'DataPackages=basic,prices'#13#10+
+             'OAuthURL=https://x/token'#13#10+
+             'BySupplierPIDURL=https://x/pid'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L',unknownNames);
+
+    CheckEqualsStr('Benutzer','benutzer',configuration.Username);
+    CheckEqualsStr('Passwort','geheim',configuration.Password);
+    CheckEqualsStr('Kundennummer','4711',configuration.CustomerNumber);
+    CheckEqualsStr('ClientID','cid',configuration.ClientID);
+    CheckEqualsStr('ClientSecret','csecret',configuration.ClientSecret);
+    CheckEqualsStr('Scope','openMasterdata',configuration.ClientScope);
+    Check('Grant-Type',configuration.GrantType = omdgt_ClientCredentials);
+    Check('Sendemodus',configuration.DataPackagesSendMode = omddpsm_Exploded);
+    Check('Datenpakete',configuration.DataPackages =
+      [omd_datapackage_basic,omd_datapackage_prices]);
+    CheckEqualsStr('OAuthURL','https://x/token',configuration.OAuthURL);
+    CheckEqualsStr('BySupplierPIDURL','https://x/pid',configuration.BySupplierPIDURL);
+
+    //Genau der Fall, der bei Richter+Frenzel den Login brach: eine
+    //Kundennummer, die der Lieferant nicht verlangt
+    WriteIni('[L]'#13#10'Username=b'#13#10'Customernumber=4711'#13#10+
+             'CustomernumberRequired=False'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('Kundennummer bleibt aussen vor','',configuration.CustomerNumber);
+
+    //In der Lieferantentabelle der Dokumentation steht ja und nein
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=nein'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('nein wird verstanden','',configuration.CustomerNumber);
+
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=ja'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('ja wird verstanden','4711',configuration.CustomerNumber);
+
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=0'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('0 wird verstanden','',configuration.CustomerNumber);
+
+    //Fehlt der Schluessel, bleibt es beim bisherigen Verhalten
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('ohne Schluessel wird gesendet','4711',configuration.CustomerNumber);
+
+    //Ein unbrauchbarer Wert darf nicht ins Gegenteil kippen
+    WriteIni('[L]'#13#10'Customernumber=4711'#13#10'CustomernumberRequired=vielleicht'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    CheckEqualsStr('unbrauchbarer Wert nimmt die Vorgabe','4711',configuration.CustomerNumber);
+
+    //Vorgaben eines leeren Abschnitts
+    WriteIni('[L]'#13#10);
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L');
+    Check('Vorgabe Grant-Type',configuration.GrantType = omdgt_Password);
+    Check('Vorgabe Sendemodus',configuration.DataPackagesSendMode = omddpsm_PipeDelimited);
+    Check('Vorgabe Datenpakete',configuration.DataPackages =
+      TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+    CheckEqualsInt('Vorgabe Wiederholungen',2,configuration.MaxRetries);
+    CheckEqualsInt('Vorgabe Wartezeit',10,configuration.MaxRetryDelaySeconds);
+
+    //Ein Tippfehler bei den Datenpaketen wird gemeldet
+    WriteIni('[L]'#13#10'DataPackages=basic,preise'#13#10);
+    unknownNames.Clear;
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(ini,'L',unknownNames);
+    Check('bekanntes Paket bleibt',omd_datapackage_basic in configuration.DataPackages);
+    Check('unbekanntes Paket wird gemeldet',unknownNames.IndexOf('preise') >= 0,
+      unknownNames.CommaText);
+
+    //Ohne Ini-Datei duerfen die Vorgaben herauskommen, nicht eine Ausnahme
+    configuration := TOpenMasterdataConfiguration.LoadFromIni(nil,'L');
+    Check('ohne Ini-Datei gelten die Vorgaben',configuration.DataPackages =
+      TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES);
+  finally
+    unknownNames.Free;
+    ini.Free;
+    if TFile.Exists(iniFilename) then
+      TFile.Delete(iniFilename);
+  end;
+end;
+
+//Ein Abruf kann gelingen und trotzdem einen anderen als den angefragten
+//Artikel liefern. Wer das nicht bemerkt, zeigt dem Anwender ein fremdes
+//Produkt.
+procedure TestProductStatus;
+var
+  res : TOpenMasterdataAPI_Result;
+  err : String;
+begin
+  Writeln('Status eines Treffers');
+
+  //Ohne Statusfeld gilt der Treffer als der angefragte
+  res := Parse('{"supplierPid":"1"}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('ohne Status ist es der angefragte Artikel',res.IsRequestedProduct);
+    Check('kein Alternativartikel',not res.IsAlternativeProduct);
+    CheckEqualsStr('kein Hinweis noetig','',res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  //Ab OM 11 steht der Status in der Antwort
+  res := Parse('{"supplierPid":"1","status":950}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('950 ist ein Alternativartikel',res.IsAlternativeProduct);
+    Check('950 ist nicht der angefragte Artikel',not res.IsRequestedProduct);
+    Check('Hinweis nennt den Alternativartikel',
+      ContainsText(res.StatusHint,'Alternativartikel'),res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":951}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('951 ist ein Nachfolgeartikel',res.IsSuccessorProduct);
+    Check('Hinweis nennt den Nachfolgeartikel',
+      ContainsText(res.StatusHint,'Nachfolgeartikel'),res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":960}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('960 ist ein nicht mehr aktiver Artikel',res.IsInactiveProduct);
+    Check('Hinweis nennt den Zustand',ContainsText(res.StatusHint,'nicht mehr aktiv'),
+      res.StatusHint);
+  finally
+    res.Free;
+  end;
+
+  res := Parse('{"supplierPid":"1","status":200}',err);
+  if res = nil then
+    Check('Antwort parsebar',false,err)
+  else
+  try
+    Check('200 ist der angefragte Artikel',res.IsRequestedProduct);
+  finally
+    res.Free;
+  end;
+end;
+
+//Eine asynchrone Katalogantwort enthaelt ein Array von Produkten.
+procedure TestResultList;
+var
+  list : TOpenMasterdataAPI_ResultList;
+  err : String;
+begin
+  Writeln('Katalogantwort mit mehreren Produkten');
+
+  list := TOpenMasterdataAPI_ResultList.Create(true);
+  try
+    //Mehrere Produkte
+    Check('Liste lesbar',list.TryLoadFromJson(
+      '[{"supplierPid":"A","basic":{"productShortDescr":"Erster"}},'+
+      '{"supplierPid":"B","basic":{"productShortDescr":"Zweiter"}}]',err),err);
+    CheckEqualsInt('zwei Produkte',2,list.Count);
+    CheckEqualsStr('erstes Produkt','A',list[0].supplierPid);
+    CheckEqualsStr('zweites Produkt','B',list[1].supplierPid);
+    CheckEqualsStr('Inhalt des zweiten','Zweiter',list[1].basic.productShortDescr);
+
+    //Ein einzelnes Produkt ist ebenfalls zulaessig
+    Check('einzelnes Produkt lesbar',
+      list.TryLoadFromJson('{"supplierPid":"C"}',err),err);
+    CheckEqualsInt('ein Produkt',1,list.Count);
+    CheckEqualsStr('Inhalt','C',list[0].supplierPid);
+
+    //Ein erneutes Laden ersetzt den Inhalt, es haeuft sich nichts an
+    Check('erneutes Laden',list.TryLoadFromJson('[{"supplierPid":"D"}]',err),err);
+    CheckEqualsInt('nur der neue Inhalt',1,list.Count);
+    CheckEqualsStr('neuer Inhalt','D',list[0].supplierPid);
+
+    //Eine leere Liste ist kein Fehler
+    Check('leere Liste lesbar',list.TryLoadFromJson('[]',err),err);
+    CheckEqualsInt('keine Produkte',0,list.Count);
+
+    //Ein unbrauchbarer Eintrag darf nicht die ganze Liste verwerfen
+    Check('Liste mit einem unbrauchbaren Eintrag',
+      list.TryLoadFromJson('[{"supplierPid":"E"},42,{"supplierPid":"F"}]',err));
+    CheckEqualsInt('die brauchbaren Eintraege bleiben',2,list.Count);
+    Check('der unbrauchbare wird genannt',err <> '',err);
+
+    //Was kein JSON ist, wird als Fehler gemeldet
+    Check('unlesbare Antwort',not list.TryLoadFromJson('kein json',err));
+    Check('Fehlertext vorhanden',err <> '');
+    Check('leere Antwort',not list.TryLoadFromJson('',err));
+
+    //Ein Skalar ist weder Produkt noch Liste
+    Check('Skalar wird abgelehnt',not list.TryLoadFromJson('42',err));
+  finally
+    list.Free;
+  end;
 end;
 
 procedure TestDataPackagesFromString;
@@ -1442,6 +1816,10 @@ begin
     Writeln;
     TestSanitizerEscaping;
     Writeln;
+    TestMarketingTextIsShown;
+    Writeln;
+    TestAllowedTagsForSupplierText;
+    Writeln;
     TestSanitizerPerformance;
     Writeln;
     TestIntegerParsing;
@@ -1457,6 +1835,12 @@ begin
     TestDataPackageWireFormat;
     Writeln;
     TestErrorMessageHygiene;
+    Writeln;
+    TestConfigurationFromIni;
+    Writeln;
+    TestProductStatus;
+    Writeln;
+    TestResultList;
     Writeln;
 
     if ParamCount > 0 then

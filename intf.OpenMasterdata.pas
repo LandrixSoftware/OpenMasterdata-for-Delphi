@@ -30,22 +30,32 @@ uses
   System.SysUtils,System.Classes,System.Contnrs,System.Variants,System.DateUtils,System.StrUtils
   ,System.Generics.Collections,System.Generics.Defaults,System.SyncObjs
   ,System.NetEncoding,System.Net.HttpClient,System.Net.URLClient
+  //Fuer TOpenMasterdataConfiguration.LoadFromIni. TCustomIniFile ist Teil
+  //der RTL, es kommt keine fremde Abhaengigkeit hinzu.
+  ,System.IniFiles
   ,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
   ,intf.OpenMasterdata.Types
   ;
 
 const
-  //Sonderstatus der Open-Masterdata-Spec 9.0.0. Zu 950 und 951 liefert der
-  //Server trotz Fehlerstatus ein vollstaendiges Produkt.
-  COpenMasterdataStatusAlternativeProduct = 950; //Artikel nicht verfuegbar, Alternativartikel im Body
-  COpenMasterdataStatusSuccessorProduct   = 951; //Artikel nicht verfuegbar, Nachfolgeartikel im Body
-  COpenMasterdataStatusAmbiguous          = 952; //mehr als ein Treffer
-  COpenMasterdataStatusInactive           = 960; //Artikel nicht mehr aktiv
+  //Die Statuswerte sind in intf.OpenMasterdata.Types deklariert, damit die
+  //Ergebnisklasse sie kennt. Hier weitergefuehrt, damit bestehender Code sie
+  //weiterhin ueber diese Unit findet.
+  COpenMasterdataStatusOk                 = intf.OpenMasterdata.Types.COpenMasterdataStatusOk;
+  COpenMasterdataStatusNotFound           = intf.OpenMasterdata.Types.COpenMasterdataStatusNotFound;
+  COpenMasterdataStatusAlternativeProduct = intf.OpenMasterdata.Types.COpenMasterdataStatusAlternativeProduct;
+  COpenMasterdataStatusSuccessorProduct   = intf.OpenMasterdata.Types.COpenMasterdataStatusSuccessorProduct;
+  COpenMasterdataStatusAmbiguous          = intf.OpenMasterdata.Types.COpenMasterdataStatusAmbiguous;
+  COpenMasterdataStatusInactive           = intf.OpenMasterdata.Types.COpenMasterdataStatusInactive;
 
   //Obergrenzen fuer SetRetryPolicy. Sie halten die Wartezeitberechnung im
   //gueltigen Zahlenbereich und verhindern absurd lange Blockaden.
   CMaxRetryLimit = 10;
   CMaxRetryDelayLimitSeconds = 300;
+
+  //Vorgaben, wenn nichts anderes gesetzt wird
+  CDefaultRetryLimit = 2;
+  CDefaultRetryDelaySeconds = 10;
 
 type
   //Auf Unit-Ebene deklariert, damit sie schon im Interface verwendbar sind.
@@ -57,12 +67,89 @@ type
   TOpenMasterdataGrantType = (omdgt_Password,omdgt_ClientCredentials);
   TOpenMasterdataDataPackagesSendMode = (omddpsm_PipeDelimited,omddpsm_Exploded);
 
+  //Alle Angaben, die eine Verbindung braucht, an einer Stelle. Gegenueber der
+  //Parameterliste mit sieben aufeinanderfolgenden Strings ist am Aufrufort
+  //sichtbar, welcher Wert wohin gehoert; vertauschte Argumente faellt sonst
+  //erst der Server auf.
+  TOpenMasterdataConfiguration = record
+    Username : String;
+    Password : String;
+    //Verlangt der Lieferant sie, wird sie mit Tabulator getrennt an den
+    //Benutzernamen gehaengt. Sonst muss sie leer bleiben, sonst weist der
+    //Server die Zugangsdaten zurueck.
+    CustomerNumber : String;
+    ClientID : String;
+    ClientSecret : String;
+    ClientScope : String;
+    GrantType : TOpenMasterdataGrantType;
+    DataPackagesSendMode : TOpenMasterdataDataPackagesSendMode;
+    //Welche Datenpakete abgefragt werden. Leer bedeutet alle.
+    DataPackages : TOpenMasterdataAPI_DataPackages;
+    OAuthURL : String;
+    BySupplierPIDURL : String;
+    ByManufacturerDataURL : String;
+    ByGTINURL : String;
+    //Optionaler Query-Parameter der Spec 9.0.0, waehlt bei einem Zugang fuer
+    //mehrere Kunden den Kunden aus
+    CustomerId : String;
+    MaxRetries : Integer;
+    MaxRetryDelaySeconds : Integer;
+
+    //Vorgaben wie bisher: Password-Flow, pipedelimited, alle Datenpakete,
+    //zwei Wiederholungen mit hoechstens zehn Sekunden Wartezeit.
+    class function Defaults : TOpenMasterdataConfiguration; static;
+
+    //Liest einen Abschnitt einer Ini-Datei. Die Schluessel entsprechen den
+    //Feldnamen; CustomernumberRequired entscheidet, ob die Kundennummer in die
+    //Anmeldung geht. Nicht erkannte Datenpaketnamen sammelt
+    //_UnknownDataPackages, damit ein Tippfehler nicht unbemerkt bleibt.
+    class function LoadFromIni(_Ini : TCustomIniFile; const _Section : String;
+      _UnknownDataPackages : TStrings = nil) : TOpenMasterdataConfiguration; static;
+  end;
+
+  //Ergebnis eines Abrufs. Fasst zusammen, was bisher ueber GetLastErrorCode,
+  //GetLastErrorMessage und den Rueckgabewert einzeln abzufragen war, und ist
+  //damit auch in nebenlaeufigem Code eindeutig.
+  //Product gehoert dem Aufrufer: er gibt es frei.
+  TOpenMasterdataResponse = record
+    Success : Boolean;
+    StatusCode : Integer;
+    ErrorMessage : String;
+    Product : TOpenMasterdataAPI_Result;
+
+    //Ein Abruf kann gelingen und trotzdem einen anderen als den angefragten
+    //Artikel liefern
+    function IsAlternativeProduct : Boolean;
+    function IsSuccessorProduct : Boolean;
+    function StatusHint : String;
+  end;
+
   IOpenMasterdataApiClient = interface
     ['{425FC785-64D4-4A17-A012-49F60448EBF8}']
 
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByGTIN(_GTIN : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    //Wie die drei Get-Funktionen, liefern aber Ergebnis, Status und Meldung in
+    //einem Wert. Ohne _DataPackages gilt die Auswahl aus der Konfiguration.
+    function FetchBySupplierPid(const _SupplierPid : String) : TOpenMasterdataResponse; overload;
+    function FetchBySupplierPid(const _SupplierPid : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+    function FetchByGTIN(const _GTIN : String) : TOpenMasterdataResponse; overload;
+    function FetchByGTIN(const _GTIN : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+    function FetchByManufacturerData(const _ManufacturerId, _ManufacturerIdType,
+      _ManufacturerPid : String) : TOpenMasterdataResponse; overload;
+    function FetchByManufacturerData(const _ManufacturerId, _ManufacturerIdType,
+      _ManufacturerPid : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+
+    //Uebernimmt Zugangsdaten, Adressen, Datenpakete und Wiederholungsstrategie
+    //in einem Zug
+    procedure ApplyConfiguration(const _Configuration : TOpenMasterdataConfiguration);
+    //Die konfigurierte Datenpaketauswahl, wie sie die Fetch-Funktionen ohne
+    //eigene Angabe verwenden
+    function GetConfiguredDataPackages : TOpenMasterdataAPI_DataPackages;
 
     procedure SetOAuthURL(const _URL : String);
     procedure SetBySupplierPIDURL(const _URL : String);
@@ -112,6 +199,8 @@ type
     FConnectionName : String;
     FGrantType : TGrantType;
     FDataPackagesSendMode : TDataPackagesSendMode;
+    //Auswahl aus der Konfiguration, von den Fetch-Funktionen verwendet
+    FConfiguredDataPackages : TOpenMasterdataAPI_DataPackages;
 
     FAccessToken : String;
     FRefreshToken : String;
@@ -157,12 +246,17 @@ type
     function SleepWithoutLock(_Milliseconds : Integer) : Boolean;
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
+    //_StatusCode und _ErrorMessage werden noch unter der Sperre eingesammelt.
+    //Wer sie erst danach ueber GetLastErrorCode liest, kann die Werte eines
+    //anderen Threads erwischen, der in der Zwischenzeit angefragt hat.
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
-      _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
+      _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+      out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
     function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource,
       _IdentifierName1, _IdentifierValue1, _IdentifierName2, _IdentifierValue2,
       _IdentifierName3, _IdentifierValue3 : String; _DataPackages : TOpenMasterdataAPI_DataPackages;
-      out _Result: TOpenMasterdataAPI_Result) : Boolean; overload;
+      out _Result: TOpenMasterdataAPI_Result;
+      out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
   public
     constructor Create(_ConnectionName, _Username, _Password, _CustomerNumber, _ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode);
     destructor Destroy; override;
@@ -204,11 +298,43 @@ type
     function GetBySupplierPid(_SupplierPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByManufacturerData(_ManufacturerId, _ManufacturerIdType, _ManufacturerPid : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
     function GetByGTIN(_GTIN : String; _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+    //Wie die drei Get-Funktionen, liefern aber Ergebnis, Status und Meldung in
+    //einem Wert. Ohne _DataPackages gilt die Auswahl aus der Konfiguration.
+    function FetchBySupplierPid(const _SupplierPid : String) : TOpenMasterdataResponse; overload;
+    function FetchBySupplierPid(const _SupplierPid : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+    function FetchByGTIN(const _GTIN : String) : TOpenMasterdataResponse; overload;
+    function FetchByGTIN(const _GTIN : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+    function FetchByManufacturerData(const _ManufacturerId, _ManufacturerIdType,
+      _ManufacturerPid : String) : TOpenMasterdataResponse; overload;
+    function FetchByManufacturerData(const _ManufacturerId, _ManufacturerIdType,
+      _ManufacturerPid : String;
+      _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse; overload;
+
+    //Uebernimmt Zugangsdaten, Adressen, Datenpakete und Wiederholungsstrategie
+    //in einem Zug
+    procedure ApplyConfiguration(const _Configuration : TOpenMasterdataConfiguration);
+    //Die konfigurierte Datenpaketauswahl, wie sie die Fetch-Funktionen ohne
+    //eigene Angabe verwenden
+    function GetConfiguredDataPackages : TOpenMasterdataAPI_DataPackages;
   public
     function GetData(_Url : String; out _Result : TStream) : Boolean;
   public
     class function GetOpenMasterdataConnection(_ConnectionName : String; out _Connection : IOpenMasterdataApiClient) : Boolean;
-    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode) : IOpenMasterdataApiClient;
+    class function NewOpenMasterdataConnection(_ConnectionName, _Username, _Password, _CustomerNumber,_ClientID, _ClientSecret, _ClientScope : String; _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode) : IOpenMasterdataApiClient; overload;
+    //Mit benannten Feldern statt sieben aufeinanderfolgenden Strings, und
+    //samt Adressen, Datenpaketauswahl und Wiederholungsstrategie.
+    class function NewOpenMasterdataConnection(const _ConnectionName : String;
+      const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient; overload;
+    //Sucht und legt unter einer Sperre an. Getrennt ausgefuehrt koennte ein
+    //anderer Thread zwischen beidem eine gleichnamige Verbindung anlegen.
+    class function FindOrCreateConnection(const _ConnectionName : String;
+      const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient; static;
+    //Direkt aus einem Abschnitt einer Ini-Datei
+    class function NewOpenMasterdataConnection(const _ConnectionName : String;
+      _Ini : TCustomIniFile; const _Section : String;
+      _UnknownDataPackages : TStrings = nil) : IOpenMasterdataApiClient; overload;
     //Entfernt eine Verbindung aus der Verwaltung. Danach gibt der naechste
     //Aufruf von NewOpenMasterdataConnection eine frische Instanz zurueck.
     class function RemoveOpenMasterdataConnection(_ConnectionName : String) : Boolean;
@@ -467,6 +593,97 @@ begin
   end;
 end;
 
+{ TOpenMasterdataConfiguration }
+
+class function TOpenMasterdataConfiguration.Defaults : TOpenMasterdataConfiguration;
+begin
+  Result := Default(TOpenMasterdataConfiguration);
+  Result.GrantType := omdgt_Password;
+  Result.DataPackagesSendMode := omddpsm_PipeDelimited;
+  Result.DataPackages := TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES;
+  Result.MaxRetries := CDefaultRetryLimit;
+  Result.MaxRetryDelaySeconds := CDefaultRetryDelaySeconds;
+end;
+
+//Liest einen Ja-Nein-Schluessel. TCustomIniFile.ReadBool versteht nur 0 und 1;
+//in Konfigurationen steht aber True, False, ja oder nein. Ein nicht erkannter
+//Wert wuerde stillschweigend zur Vorgabe, was hier das Gegenteil des Gemeinten
+//bedeuten kann.
+function ReadConfigurationFlag(_Ini : TCustomIniFile; const _Section,_Key : String;
+  _Default : Boolean) : Boolean;
+var
+  configuredValue : String;
+begin
+  configuredValue := Trim(_Ini.ReadString(_Section,_Key,''));
+  if configuredValue = '' then
+    exit(_Default);
+  if MatchText(configuredValue,['true','ja','yes','y','j','1','-1']) then
+    exit(true);
+  if MatchText(configuredValue,['false','nein','no','n','0']) then
+    exit(false);
+  Result := _Default;
+end;
+
+class function TOpenMasterdataConfiguration.LoadFromIni(_Ini : TCustomIniFile;
+  const _Section : String; _UnknownDataPackages : TStrings) : TOpenMasterdataConfiguration;
+begin
+  Result := TOpenMasterdataConfiguration.Defaults;
+  if _Ini = nil then
+    exit;
+
+  Result.Username := _Ini.ReadString(_Section,'Username','');
+  Result.Password := _Ini.ReadString(_Section,'Password','');
+
+  //Verlangt der Lieferant die Kundennummer nicht, darf sie nicht in die
+  //Anmeldung geraten: sie wuerde sonst an den Benutzernamen gehaengt und der
+  //Server weist die Zugangsdaten zurueck. Fehlt der Schluessel, bleibt es beim
+  //bisherigen Verhalten und die Nummer wird gesendet.
+  if ReadConfigurationFlag(_Ini,_Section,'CustomernumberRequired',true) then
+    Result.CustomerNumber := _Ini.ReadString(_Section,'Customernumber','');
+
+  Result.ClientID := _Ini.ReadString(_Section,'ClientID','');
+  Result.ClientSecret := _Ini.ReadString(_Section,'ClientSecret','');
+  Result.ClientScope := _Ini.ReadString(_Section,'ClientScope','');
+
+  Result.GrantType := TOpenMasterdataApiClient.GetGrantTypeFromString(
+                        _Ini.ReadString(_Section,'GrantType',''),Result.GrantType);
+  Result.DataPackagesSendMode := TOpenMasterdataApiClient.GetDataPackagesSendModeFromString(
+                        _Ini.ReadString(_Section,'DataPackageSendMode',''),Result.DataPackagesSendMode);
+  Result.DataPackages := TOpenMasterdataAPI_DataPackageHelper.DataPackagesFromString(
+                        _Ini.ReadString(_Section,'DataPackages',''),
+                        Result.DataPackages,_UnknownDataPackages);
+
+  Result.OAuthURL := _Ini.ReadString(_Section,'OAuthURL','');
+  Result.BySupplierPIDURL := _Ini.ReadString(_Section,'BySupplierPIDURL','');
+  Result.ByManufacturerDataURL := _Ini.ReadString(_Section,'ByManufacturerDataURL','');
+  Result.ByGTINURL := _Ini.ReadString(_Section,'ByGTINURL','');
+  Result.CustomerId := _Ini.ReadString(_Section,'CustomerId','');
+
+  Result.MaxRetries := _Ini.ReadInteger(_Section,'MaxRetries',Result.MaxRetries);
+  Result.MaxRetryDelaySeconds := _Ini.ReadInteger(_Section,'MaxRetryDelaySeconds',
+                                                  Result.MaxRetryDelaySeconds);
+end;
+
+{ TOpenMasterdataResponse }
+
+function TOpenMasterdataResponse.IsAlternativeProduct : Boolean;
+begin
+  Result := StatusCode = COpenMasterdataStatusAlternativeProduct;
+end;
+
+function TOpenMasterdataResponse.IsSuccessorProduct : Boolean;
+begin
+  Result := StatusCode = COpenMasterdataStatusSuccessorProduct;
+end;
+
+function TOpenMasterdataResponse.StatusHint : String;
+begin
+  if Product <> nil then
+    Result := Product.StatusHint
+  else
+    Result := '';
+end;
+
 procedure EnsureOpenConnectionsInitialized;
 begin
   TMonitor.Enter(openConnectionsInitLock);
@@ -642,8 +859,9 @@ begin
 
   //Zwei Wiederholungen bei Ueberlast, dazwischen 1 und 2 Sekunden. Laengere
   //Wartezeiten aus Retry-After werden nicht abgewartet, siehe SetRetryPolicy.
-  FMaxRetries := 2;
-  FMaxRetryDelaySeconds := 10;
+  FMaxRetries := CDefaultRetryLimit;
+  FMaxRetryDelaySeconds := CDefaultRetryDelaySeconds;
+  FConfiguredDataPackages := TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES;
   FConfigGeneration := 0;
 end;
 
@@ -1114,54 +1332,96 @@ end;
 function TOpenMasterdataApiClient.GetBySupplierPid(_SupplierPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
+  //Status und Meldung bleiben hier ueber GetLastErrorCode abfragbar, wie
+  //bisher. Eindeutig sind sie nur in FetchBySupplierPid.
   Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(epBySupplierPid),
-    'supplierPid',_SupplierPid,_DataPackages,_Result);
+    'supplierPid',_SupplierPid,_DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.GetByManufacturerData(_ManufacturerId,
   _ManufacturerIdType, _ManufacturerPid: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
   Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(epByManufacturerData),
     'manufacturerId',_ManufacturerId,
     'manufacturerIdType',_ManufacturerIdType,
     'manufacturerPid',_ManufacturerPid,
-    _DataPackages,_Result);
+    _DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.GetByGTIN(_GTIN: String;
   _DataPackages: TOpenMasterdataAPI_DataPackages;
   out _Result: TOpenMasterdataAPI_Result): Boolean;
+var
+  statusCode : Integer;
+  errorMessage : String;
 begin
-  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,_DataPackages,_Result);
+  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+    _DataPackages,_Result,statusCode,errorMessage);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
   const _Resource, _IdentifierName, _IdentifierValue : String;
-  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+  out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
 begin
-  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,'','','','',_DataPackages,_Result);
+  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,
+              '','','','',_DataPackages,_Result,_StatusCode,_ErrorMessage);
 end;
 
 function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
   const _Resource, _IdentifierName1, _IdentifierValue1, _IdentifierName2,
   _IdentifierValue2, _IdentifierName3, _IdentifierValue3 : String;
-  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result) : Boolean;
+  _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
+  out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
 var
   RESTResponse: TRESTResponse;
   RESTRequest: TRESTRequest;
   parseError : String;
+  //Nur dieser Aufruf beschreibt sie. Die Felder FLastErrorCode und
+  //FLastErrorMessage sind geteilt, und sie sind nicht einmal fuer die Dauer
+  //eines Abrufs verlaesslich: wartet dieser Abruf vor einem Wiederholversuch,
+  //gibt SleepWithoutLock die Sperre frei, und ein anderer Abruf schreibt in
+  //der Luecke sein eigenes Ergebnis hinein.
+  localStatusCode : Integer;
+  localErrorMessage : String;
+
+  //Haelt beide Staende im Gleichlauf: den geteilten fuer GetLastErrorMessage
+  //und den eigenen fuer die Rueckgabe.
+  procedure SetError(const _Message : String);
+  begin
+    localErrorMessage := _Message;
+    FLastErrorMessage := _Message;
+  end;
+
 begin
   Result := false;
   _Result := nil;
+  localStatusCode := 0;
+  localErrorMessage := '';
 
   FCS.Acquire;
   try
 
   if not LoggedIn then
+  begin
+    //Der Abruf hat nicht stattgefunden, es gibt also keinen Produktstatus;
+    //localStatusCode bleibt 0. Uebernommen wird nur die Meldung des Logins.
+    //FLastErrorCode taugt dafuer nicht: bei einer OAuth-Antwort mit Status 200
+    //ohne Token setzt Login ihn gar nicht, und waehrend einer Wartezeit kann
+    //ein fremder Abruf ihn beschrieben haben. Die Meldung dagegen setzt Login
+    //nach seinem letzten Warten, sie gehoert zu diesem Aufruf.
+    localErrorMessage := FLastErrorMessage;
     exit;
+  end;
 
   FLastBySupplierPIDResponseContent := '';
   FLastErrorMessage := '';
@@ -1169,19 +1429,19 @@ begin
 
   if (_RestClient = nil) or _Resource.IsEmpty then
   begin
-    FLastErrorMessage := 'Fuer diese Abfrage ist keine URL konfiguriert.';
+    SetError('Fuer diese Abfrage ist keine URL konfiguriert.');
     exit;
   end;
   if ((_IdentifierName1 <> '') and _IdentifierValue1.IsEmpty) or
      ((_IdentifierName2 <> '') and _IdentifierValue2.IsEmpty) or
      ((_IdentifierName3 <> '') and _IdentifierValue3.IsEmpty) then
   begin
-    FLastErrorMessage := 'Die Abfrage enthaelt kein vollstaendiges Suchkriterium.';
+    SetError('Die Abfrage enthaelt kein vollstaendiges Suchkriterium.');
     exit;
   end;
   if _DataPackages = [] then
   begin
-    FLastErrorMessage := 'Es wurde kein Datenpaket ausgewaehlt.';
+    SetError('Es wurde kein Datenpaket ausgewaehlt.');
     exit;
   end;
 
@@ -1215,12 +1475,21 @@ begin
     RESTRequest.Response := RESTResponse;
 
     if not ExecuteWithRetry(RESTRequest,RESTResponse) then
+    begin
+      //Der Status des letzten Versuchs steht im eigenen Response-Objekt, nicht
+      //in FLastErrorCode: ExecuteWithRetry setzt bei seinen Abbruechen nur die
+      //Meldung, der Code waere der eines frueheren oder fremden Abrufs.
+      localStatusCode := RESTResponse.StatusCode;
+      localErrorMessage := FLastErrorMessage;
       exit;
+    end;
 
     //Nur im Fehlerfall setzen, damit GetLastErrorCode nach einem erfolgreichen
     //Abruf 0 bleibt. Bei 950 und 951 bleibt der Code abfragbar.
     if RESTResponse.StatusCode <> 200 then
       FLastErrorCode := RESTResponse.StatusCode;
+    //Der eigene Stand nimmt den Status dieser Antwort, auch wenn er 200 ist
+    localStatusCode := RESTResponse.StatusCode;
 
     //Ein abgelaufener oder zurueckgezogener Token muss verworfen werden,
     //sonst laufen alle weiteren Abfragen bis zum rechnerischen Ablauf in 401
@@ -1236,9 +1505,9 @@ begin
             (RESTResponse.StatusCode = COpenMasterdataStatusAlternativeProduct) or
             (RESTResponse.StatusCode = COpenMasterdataStatusSuccessorProduct)) then
     begin
-      FLastErrorMessage := AppendResponseDetail(
+      SetError(AppendResponseDetail(
         StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText),
-        RESTResponse.Content);
+        RESTResponse.Content));
       FLastBySupplierPIDResponseContent := RESTResponse.Content;
       exit;
     end;
@@ -1250,15 +1519,20 @@ begin
       if not _Result.TryLoadFromJson(RESTResponse.Content,parseError) then
       begin
         FreeAndNil(_Result);
-        FLastErrorMessage := parseError;
+        SetError(parseError);
         exit;
       end;
+      //Erst ab OM 11 fuehrt die Antwort den Status als Feld. Fehlt er, wird der
+      //HTTP-Status nachgetragen: nur so erkennt der Aufrufer, dass er bei 950
+      //oder 951 einen Alternativ- statt des angefragten Artikels erhalten hat.
+      if _Result.status = 0 then
+        _Result.status := RESTResponse.StatusCode;
       Result := true;
     except
       on E:Exception do
       begin
         FreeAndNil(_Result);
-        FLastErrorMessage := E.ClassName+' '+e.Message;
+        SetError(E.ClassName+' '+e.Message);
         exit;
       end;
     end;
@@ -1268,8 +1542,183 @@ begin
   end;
 
   finally
+    //Aus den eigenen Variablen, nicht aus den geteilten Feldern. Das finally
+    //laeuft auch bei jedem vorzeitigen exit.
+    _StatusCode := localStatusCode;
+    _ErrorMessage := localErrorMessage;
     FCS.Release;
   end;
+end;
+
+procedure TOpenMasterdataApiClient.ApplyConfiguration(
+  const _Configuration : TOpenMasterdataConfiguration);
+begin
+  //Die Uebernahme muss als Ganzes geschehen. Jeder einzelne Setter nimmt und
+  //gibt die Sperre selbst; ohne diese umschliessende Sperre koennte ein
+  //parallel laufender Abruf einen Zwischenstand erwischen und sich etwa mit
+  //den neuen Zugangsdaten am alten OAuth-Endpunkt anmelden. TCriticalSection
+  //laesst denselben Thread mehrfach eintreten, die Setter funktionieren also
+  //unveraendert weiter.
+  FCS.Acquire;
+  try
+    SetCredentials(_Configuration.Username,_Configuration.Password,
+      _Configuration.CustomerNumber,_Configuration.ClientID,
+      _Configuration.ClientSecret,_Configuration.ClientScope,
+      _Configuration.GrantType,_Configuration.DataPackagesSendMode);
+
+    SetOAuthURL(_Configuration.OAuthURL);
+    SetBySupplierPIDURL(_Configuration.BySupplierPIDURL);
+    SetByManufacturerDataURL(_Configuration.ByManufacturerDataURL);
+    SetByGTINURL(_Configuration.ByGTINURL);
+    SetCustomerId(_Configuration.CustomerId);
+    SetRetryPolicy(_Configuration.MaxRetries,_Configuration.MaxRetryDelaySeconds);
+
+    //Eine leere Auswahl waere nicht abfragbar, dann gelten alle Pakete
+    if _Configuration.DataPackages = [] then
+      FConfiguredDataPackages := TOpenMasterdataAPI_DataPackageHelper.ALL_DATAPACKAGES
+    else
+      FConfiguredDataPackages := _Configuration.DataPackages;
+  finally
+    FCS.Release;
+  end;
+end;
+
+function TOpenMasterdataApiClient.GetConfiguredDataPackages : TOpenMasterdataAPI_DataPackages;
+begin
+  FCS.Acquire;
+  try
+    Result := FConfiguredDataPackages;
+  finally
+    FCS.Release;
+  end;
+end;
+
+//Die Fetch-Funktionen fassen zusammen, was bisher aus Rueckgabewert,
+//GetLastErrorCode und GetLastErrorMessage einzeln zusammenzusuchen war.
+function TOpenMasterdataApiClient.FetchBySupplierPid(
+  const _SupplierPid : String) : TOpenMasterdataResponse;
+begin
+  Result := FetchBySupplierPid(_SupplierPid,GetConfiguredDataPackages);
+end;
+
+function TOpenMasterdataApiClient.FetchBySupplierPid(const _SupplierPid : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
+begin
+  Result := Default(TOpenMasterdataResponse);
+  //Status und Meldung kommen aus dem Abruf selbst, noch unter dessen Sperre
+  //eingesammelt. Ueber GetLastErrorCode gelesen koennten sie von einem
+  //anderen Thread stammen.
+  Result.Success := ExecuteProductRequest(FRESTClientBySupplierPID,
+                      ReadEndpointUrl(epBySupplierPid),'supplierPid',_SupplierPid,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
+  //Bei 950 und 951 ist der Abruf gelungen, geliefert wurde aber ein anderer
+  //Artikel. Der Statuscode bleibt darum auch im Erfolgsfall abfragbar; bei
+  //einer Antwort ohne eigenen Status gilt der des Produkts.
+  if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
+    Result.StatusCode := Result.Product.status;
+end;
+
+function TOpenMasterdataApiClient.FetchByGTIN(
+  const _GTIN : String) : TOpenMasterdataResponse;
+begin
+  Result := FetchByGTIN(_GTIN,GetConfiguredDataPackages);
+end;
+
+function TOpenMasterdataApiClient.FetchByGTIN(const _GTIN : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
+begin
+  Result := Default(TOpenMasterdataResponse);
+  Result.Success := ExecuteProductRequest(FRESTClientByGTIN,
+                      ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
+  if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
+    Result.StatusCode := Result.Product.status;
+end;
+
+function TOpenMasterdataApiClient.FetchByManufacturerData(const _ManufacturerId,
+  _ManufacturerIdType, _ManufacturerPid : String) : TOpenMasterdataResponse;
+begin
+  Result := FetchByManufacturerData(_ManufacturerId,_ManufacturerIdType,
+              _ManufacturerPid,GetConfiguredDataPackages);
+end;
+
+function TOpenMasterdataApiClient.FetchByManufacturerData(const _ManufacturerId,
+  _ManufacturerIdType, _ManufacturerPid : String;
+  _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
+begin
+  Result := Default(TOpenMasterdataResponse);
+  Result.Success := ExecuteProductRequest(FRESTClientByManufacturerData,
+                      ReadEndpointUrl(epByManufacturerData),
+                      'manufacturerId',_ManufacturerId,
+                      'manufacturerIdType',_ManufacturerIdType,
+                      'manufacturerPid',_ManufacturerPid,
+                      _DataPackages,Result.Product,
+                      Result.StatusCode,Result.ErrorMessage);
+  if Result.Success then
+    Result.ErrorMessage := '';
+  if Result.Success and (Result.StatusCode = 0) and (Result.Product <> nil) then
+    Result.StatusCode := Result.Product.status;
+end;
+
+class function TOpenMasterdataApiClient.FindOrCreateConnection(
+  const _ConnectionName : String;
+  const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient;
+var
+  i : Integer;
+begin
+  EnsureOpenConnectionsInitialized;
+  openConnectionsCS.Acquire;
+  try
+    for i := 0 to openConnections.Count-1 do
+      if SameText(_ConnectionName,
+           IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
+        //Eine bestehende Verbindung wird unveraendert zurueckgegeben. Die
+        //Zugangsdaten setzt allein ApplyConfiguration, zusammen mit den
+        //Adressen und unter einer Sperre.
+        exit(IOpenMasterdataApiClient(openConnections[i]));
+
+    //Eine neue Verbindung erhaelt die Zugangsdaten schon im Konstruktor. Sie
+    //ist damit von ihrem ersten sichtbaren Augenblick an stimmig; bis
+    //ApplyConfiguration die Adressen nachtraegt, scheitert ein paralleler
+    //Abruf mit "keine URL konfiguriert" statt mit falschen Daten.
+    Result := TOpenMasterdataApiClient.Create(_ConnectionName,
+                _Configuration.Username,_Configuration.Password,
+                _Configuration.CustomerNumber,_Configuration.ClientID,
+                _Configuration.ClientSecret,_Configuration.ClientScope,
+                _Configuration.GrantType,_Configuration.DataPackagesSendMode);
+    openConnections.Add(Result);
+  finally
+    openConnectionsCS.Release;
+  end;
+end;
+
+class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
+  const _ConnectionName : String;
+  const _Configuration : TOpenMasterdataConfiguration) : IOpenMasterdataApiClient;
+begin
+  //Suchen und Anlegen gehoeren in denselben Sperrabschnitt. Getrennt
+  //ausgefuehrt kann ein anderer Thread dazwischen eine gleichnamige Verbindung
+  //anlegen; die Ueberladung mit den einzelnen Parametern wuerde dann nur deren
+  //Zugangsdaten austauschen und die Adressen des anderen Lieferanten stehen
+  //lassen.
+  Result := FindOrCreateConnection(_ConnectionName,_Configuration);
+  //Adressen, Datenpakete und Wiederholungsstrategie uebernehmen, unter einer
+  //Sperre und damit als Ganzes
+  Result.ApplyConfiguration(_Configuration);
+end;
+
+class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
+  const _ConnectionName : String; _Ini : TCustomIniFile; const _Section : String;
+  _UnknownDataPackages : TStrings) : IOpenMasterdataApiClient;
+begin
+  Result := NewOpenMasterdataConnection(_ConnectionName,
+              TOpenMasterdataConfiguration.LoadFromIni(_Ini,_Section,_UnknownDataPackages));
 end;
 
 function TOpenMasterdataApiClient.GetConnectionName: String;
