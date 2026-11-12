@@ -57,8 +57,11 @@ type
     Status : Integer;
     Content : String;
     RetryAfter : String;
+    Location : String;
+    StatusText : String;
     class function Make(_Status : Integer; const _Content : String;
       const _RetryAfter : String = '') : TStubReply; static;
+    class function Redirect(_Status : Integer; const _Location : String) : TStubReply; static;
   end;
 
   TStubHandler = reference to function(const _Request : TStubRequest) : TStubReply;
@@ -93,6 +96,14 @@ begin
   Result.Status := _Status;
   Result.Content := _Content;
   Result.RetryAfter := _RetryAfter;
+  Result.Location := '';
+  Result.StatusText := '';
+end;
+
+class function TStubReply.Redirect(_Status : Integer; const _Location : String) : TStubReply;
+begin
+  Result := Make(_Status,'');
+  Result.Location := _Location;
 end;
 
 { TStubServer }
@@ -161,6 +172,10 @@ begin
   AResponseInfo.ContentText := reply.Content;
   if reply.RetryAfter <> '' then
     AResponseInfo.CustomHeaders.Values['Retry-After'] := reply.RetryAfter;
+  if reply.StatusText <> '' then
+    AResponseInfo.ResponseText := reply.StatusText;
+  if reply.Location <> '' then
+    AResponseInfo.Location := reply.Location;
 end;
 
 //Indy kennt von sich aus nur Basic und beantwortet jedes andere Schema mit

@@ -48,6 +48,7 @@ uses
   intf.OpenMasterdata in '..\intf.OpenMasterdata.pas',
   intf.OpenMasterdata.Types in '..\intf.OpenMasterdata.Types.pas',
   intf.OpenMasterdata.View in '..\intf.OpenMasterdata.View.pas',
+  intf.OpenMasterdata.Model in '..\intf.OpenMasterdata.Model.pas',
   OpenMasterdataTests.StubServer in 'OpenMasterdataTests.StubServer.pas';
 
 var
@@ -1807,6 +1808,18 @@ begin
       exit(i);
 end;
 
+//Wert eines Parameters aus einem Formular-Body, wie er am Draht ankam, also
+//noch URL-kodiert
+function StubRawFormValue(const _Body, _Name : String) : String;
+var
+  pair : String;
+begin
+  Result := '';
+  for pair in _Body.Split(['&']) do
+    if pair.StartsWith(_Name+'=') then
+      exit(pair.Substring(Length(_Name)+1));
+end;
+
 //Wert eines Parameters aus einem Formular-Body (a=1&b=2). Ein Vergleich per
 //Pos wuerde auch password=passXYZ oder otherpassword=pass gelten lassen.
 function StubFormValue(const _Body, _Name : String) : String;
@@ -1910,6 +1923,7 @@ begin
       Check('Alternativartikel ist ein Erfolg',response.Success,response.ErrorMessage);
       CheckEqualsInt('Status 950',COpenMasterdataStatusAlternativeProduct,response.StatusCode);
       Check('als Alternative erkennbar',response.IsAlternativeProduct);
+      Check('Ersatzprodukt geliefert',Assigned(response.Product));
       if Assigned(response.Product) then
         CheckEqualsStr('das Ersatzprodukt','ALT-ERSATZ',response.Product.supplierPid);
     finally
@@ -2348,6 +2362,695 @@ begin
   CheckEqualsInt('immer genau eine Verbindung je Name',0,distinct);
 end;
 
+//---------------------------------------------------------------------------
+//Tests zum Gesamtreview vom 12.11.2026
+//---------------------------------------------------------------------------
+
+//Dieselbe Gegenstelle unter einem anderen Hostnamen. Fuer den Client ist das
+//ein fremder Ursprung, die Anfrage landet trotzdem beim Testserver.
+function StubForeignUrl(_Server : TStubServer; const _Path : String) : String;
+begin
+  Result := StringReplace(_Server.Url(_Path),'127.0.0.1','localhost',[]);
+end;
+
+function StubAuthorizationOf(_Server : TStubServer; const _Path : String) : String;
+var
+  request : TStubRequest;
+begin
+  Result := '(keine Anfrage)';
+  for request in _Server.Requests do
+    if SameText(request.Path,_Path) then
+      exit(request.Authorization);
+end;
+
+procedure TestStubRedirectNotFollowed;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  configuration : TOpenMasterdataConfiguration;
+begin
+  Writeln('HTTP: Weiterleitungen werden nicht verfolgt');
+
+  server := nil;
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      if _Request.Path = '/oauth/umgeleitet' then
+        exit(TStubReply.Redirect(307,StubForeignUrl(server,'/fremd/token')));
+      if _Request.Path = CStubProductPath then
+        exit(TStubReply.Redirect(302,StubForeignUrl(server,'/fremd/produkt')));
+      Result := TStubReply.Make(200,StubProduct('FREMD'));
+    end);
+  try
+    client := CreateStubClient(server,0);
+    response := client.FetchBySupplierPid('OK');
+    try
+      Check('Abruf mit Weiterleitung scheitert',not response.Success);
+      Check('Meldung nennt die Weiterleitung',Pos('leitet weiter',response.ErrorMessage) > 0,response.ErrorMessage);
+      Check('Meldung nennt den Zielhost',Pos('localhost',response.ErrorMessage) > 0,response.ErrorMessage);
+      CheckEqualsInt('Status der Weiterleitung',302,response.StatusCode);
+    finally
+      response.Product.Free;
+    end;
+    CheckEqualsInt('nichts an das Ziel geschickt',0,server.RequestCount('/fremd/produkt'));
+
+    //Auch die Anmeldung folgt keiner Weiterleitung: mit 307 gingen die
+    //Zugangsdaten im Formular an das Ziel
+    configuration := TOpenMasterdataConfiguration.Defaults;
+    configuration.Username := 'user';
+    configuration.Password := 'pass';
+    configuration.OAuthURL := server.Url('/oauth/umgeleitet');
+    configuration.BySupplierPIDURL := server.Url(CStubProductPath);
+    configuration.MaxRetries := 0;
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    try
+      Check('Anmeldung mit Weiterleitung scheitert',not response.Success);
+      Check('Meldung nennt die Weiterleitung',Pos('leitet weiter',response.ErrorMessage) > 0,response.ErrorMessage);
+    finally
+      response.Product.Free;
+    end;
+    CheckEqualsInt('keine Zugangsdaten an das Ziel',0,server.RequestCount('/fremd/token'));
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubGetDataToken;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  data : TStream;
+begin
+  Writeln('HTTP: Downloads senden den Token nur an den API-Host');
+
+  server := nil;
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      if _Request.Path = '/bild/umleitung' then
+        exit(TStubReply.Redirect(302,StubForeignUrl(server,'/bild/ziel')));
+      if (_Request.Path = '/bild/abfrage') and (Pos('alt=1',_Request.Query) > 0) then
+        exit(TStubReply.Redirect(302,'?neu=2'));
+      //Nur ein Fragment: einmal weiterleiten, dann liefern
+      if (_Request.Path = '/bild/fragment') and (server.RequestCount('/bild/fragment') = 1) then
+        exit(TStubReply.Redirect(302,'#page=2'));
+      //Ungueltiger Port: der folgende Abruf wirft eine Exception mit der Adresse
+      if _Request.Path = '/bild/kaputt' then
+        exit(TStubReply.Redirect(302,'https://cdn.example:ungueltig/pass-wort'));
+      if (_Request.Path = '/bild/eingebettet') and (Pos('alt=1',_Request.Query) > 0) then
+        exit(TStubReply.Redirect(302,'?source=https://cdn.example/x'));
+      Result := TStubReply.Make(200,'BILDDATEN');
+    end);
+  try
+    client := CreateStubClient(server,0);
+
+    Check('Download vom API-Host',client.GetData(server.Url('/bild/eigen'),data));
+    data.Free;
+    CheckEqualsStr('Token an den API-Host','Bearer tok-1',StubAuthorizationOf(server,'/bild/eigen'));
+
+    Check('Download von fremdem Host',client.GetData(StubForeignUrl(server,'/bild/fremd'),data));
+    if Assigned(data) then
+      CheckEqualsInt('Inhalt vollstaendig',Length('BILDDATEN'),data.Size);
+    data.Free;
+    CheckEqualsStr('kein Token an fremden Host','',StubAuthorizationOf(server,'/bild/fremd'));
+
+    Check('Download ueber Weiterleitung',client.GetData(server.Url('/bild/umleitung'),data));
+    data.Free;
+    CheckEqualsStr('Token an den API-Host vor der Weiterleitung','Bearer tok-1',
+      StubAuthorizationOf(server,'/bild/umleitung'));
+    CheckEqualsStr('kein Token an das Ziel der Weiterleitung','',
+      StubAuthorizationOf(server,'/bild/ziel'));
+
+    //Eine Location, die nur die Query ersetzt, behaelt den Dateipfad
+    Check('Download ueber Weiterleitung mit neuer Query',
+      client.GetData(server.Url('/bild/abfrage?alt=1'),data));
+    data.Free;
+    CheckEqualsInt('Ziel behaelt den Pfad',1,server.RequestCount('/bild/abfrage','neu=2'));
+
+    //Eine Weiterleitung nur auf ein Fragment behaelt Pfad und Query
+    Check('Download ueber Weiterleitung auf ein Fragment',
+      client.GetData(server.Url('/bild/fragment?sig=abc'),data));
+    data.Free;
+    CheckEqualsInt('Pfad und Query bleiben erhalten',2,server.RequestCount('/bild/fragment','sig=abc'));
+
+    //Eine Adresse in der Query macht die Location nicht absolut
+    Check('Download ueber Weiterleitung mit Adresse in der Query',
+      client.GetData(server.Url('/bild/eingebettet?alt=1'),data));
+    data.Free;
+    CheckEqualsInt('Ziel mit Adresse in der Query',1,server.RequestCount('/bild/eingebettet','source='));
+
+    //Die Meldung zur Exception nennt die Adresse; das Passwort "pass" steht
+    //darin und muss ersetzt sein
+    Check('Weiterleitung auf ungueltige Adresse scheitert',
+      not client.GetData(server.Url('/bild/kaputt'),data));
+    data.Free;
+    Check('Meldung vorhanden',client.GetLastErrorMessage <> '');
+    Check('Passwort nicht in der Meldung',Pos('pass',client.GetLastErrorMessage) = 0,client.GetLastErrorMessage);
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+//Waehrend ein Download auf seinen Wiederholversuch wartet, erneuert ein
+//anderer Abruf den Token. Lehnt der Server danach ab und nennt den neuen
+//Token, darf er nicht in der Meldung stehen, obwohl er dabei verworfen wird.
+procedure TestStubGetDataRenewedToken;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  waiting : TEvent;
+  thread : TThread;
+  response : TOpenMasterdataResponse;
+  oauthCalls, slowCalls : Integer;
+  downloaded : Boolean;
+begin
+  Writeln('HTTP: Download mit waehrend der Wartezeit erneuertem Token');
+
+  oauthCalls := 0;
+  slowCalls := 0;
+  downloaded := true;
+  waiting := TEvent.Create(nil,true,false,'');
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+      begin
+        //Der erste Token laeuft nach einer Sekunde ab
+        if TInterlocked.Increment(oauthCalls) = 1 then
+          exit(TStubReply.Make(200,'{"access_token":"tok-alt","expires_in":1}'));
+        exit(TStubReply.Make(200,'{"access_token":"tok-neu-123","expires_in":3600}'));
+      end;
+      if _Request.Path = '/bild/langsam' then
+      begin
+        if TInterlocked.Increment(slowCalls) = 1 then
+        begin
+          waiting.SetEvent;
+          exit(TStubReply.Make(503,'','2'));
+        end;
+        Result := TStubReply.Make(403,'');
+        Result.StatusText := 'Denied '+Copy(_Request.Authorization,8,MaxInt);
+        exit;
+      end;
+      Result := TStubReply.Make(200,StubProduct('OK'));
+    end);
+  try
+    client := CreateStubClient(server,1);
+    thread := TThread.CreateAnonymousThread(
+      procedure
+      var
+        data : TStream;
+      begin
+        downloaded := client.GetData(server.Url('/bild/langsam'),data);
+        data.Free;
+      end);
+    thread.FreeOnTerminate := false;
+    try
+      thread.Start;
+      Check('Download erreicht die Wartezeit',waiting.WaitFor(10000) = wrSignaled);
+      //Erst nach Ablauf des ersten Tokens: der Abruf meldet sich neu an
+      Sleep(1200);
+      response := client.FetchBySupplierPid('OK');
+      response.Product.Free;
+      Check('Abruf mit neuem Token gelingt',response.Success,response.ErrorMessage);
+      WaitForThreadOrAbort(thread,'Download');
+    finally
+      thread.Free;
+    end;
+
+    CheckEqualsInt('zwei Anmeldungen',2,server.RequestCount(CStubOAuthPath));
+    Check('Download scheitert',not downloaded);
+    Check('Meldung vorhanden',client.GetLastErrorMessage <> '');
+    Check('neuer Token nicht in der Meldung',Pos('tok-neu-123',client.GetLastErrorMessage) = 0,
+      client.GetLastErrorMessage);
+  finally
+    client := nil;
+    server.Free;
+    waiting.Free;
+  end;
+end;
+
+procedure TestStubEndpointChanges;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  configuration : TOpenMasterdataConfiguration;
+begin
+  Writeln('HTTP: Adresswechsel und ungueltige OAuth-URL');
+
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      Result := TStubReply.Make(200,StubProduct('OK'));
+    end);
+  try
+    configuration := TOpenMasterdataConfiguration.Defaults;
+    configuration.Username := 'user';
+    configuration.Password := 'pass';
+    configuration.OAuthURL := server.Url(CStubOAuthPath);
+    configuration.BySupplierPIDURL := server.Url(CStubProductPath);
+    configuration.MaxRetries := 0;
+    client := TOpenMasterdataApiClient.Create('stub','user','pass','','','','',
+      configuration.GrantType,configuration.DataPackagesSendMode);
+    client.ApplyConfiguration(configuration);
+
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('erster Abruf gelingt',response.Success,response.ErrorMessage);
+
+    //Dieselbe Konfiguration erneut: kein neuer Login
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    CheckEqualsInt('unveraenderte Konfiguration behaelt den Token',1,server.RequestCount(CStubOAuthPath));
+
+    //Andere Adresse bei gleichen Zugangsdaten: der Token gehoert dem alten Ziel
+    configuration.BySupplierPIDURL := server.Url('/anderer/endpunkt');
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('Abruf am neuen Endpunkt gelingt',response.Success,response.ErrorMessage);
+    CheckEqualsInt('neue Adresse verlangt neuen Login',2,server.RequestCount(CStubOAuthPath));
+
+    //Leere und ungueltige OAuth-URL bei neuen Zugangsdaten: nichts darf an
+    //den bisherigen Host gehen
+    configuration.Username := 'anderer';
+    configuration.OAuthURL := '';
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('ohne OAuth-URL kein Erfolg',not response.Success);
+    Check('Meldung nennt die fehlende URL',Pos('OAuth-URL',response.ErrorMessage) > 0,response.ErrorMessage);
+
+    configuration.OAuthURL := 'auth.example/token';
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('mit ungueltiger OAuth-URL kein Erfolg',not response.Success);
+    CheckEqualsInt('keine Zugangsdaten an den alten Host',2,server.RequestCount(CStubOAuthPath));
+    CheckEqualsInt('keine Anfrage an die Wurzel des alten Hosts',0,server.RequestCount('/'));
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+//Manche Server spiegeln das abgelehnte Passwort in ihre Meldung
+procedure TestStubOwnSecretsMasked;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  configuration : TOpenMasterdataConfiguration;
+  mode : Integer;
+  //Das Passwort, wie es kodiert im Formular ankam
+  LastSentPassword : String;
+
+  procedure CheckLogin(_Mode : Integer; const _Secret, _Name : String);
+  begin
+    mode := _Mode;
+    configuration.Password := _Secret;
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check(_Name+': Anmeldung scheitert',not response.Success);
+    //Auch die JSON-Schreibweise verraet das Passwort
+    Check(_Name+': Passwort nicht in der Meldung',
+      (Pos(_Secret,response.ErrorMessage) = 0) and
+      (Pos(StringReplace(_Secret,'/','\/',[rfReplaceAll]),response.ErrorMessage) = 0) and
+      (Pos(TNetEncoding.URL.Encode(_Secret),response.ErrorMessage) = 0) and
+      (Pos(LastSentPassword,response.ErrorMessage) = 0) and
+      (Pos(StringReplace(StringReplace(_Secret,'"','\"',[rfReplaceAll]),'/','\/',[rfReplaceAll]),
+        response.ErrorMessage) = 0),
+      response.ErrorMessage);
+  end;
+
+begin
+  Writeln('HTTP: eigene Zugangsdaten erscheinen in keiner Meldung');
+
+  mode := 0;
+  LastSentPassword := '';
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    var
+      password : String;
+    begin
+      password := StubFormValue(_Request.Body,'password');
+      if _Request.Path = CStubOAuthPath then
+        LastSentPassword := StubRawFormValue(_Request.Body,'password');
+      if _Request.Path = CStubOAuthPath then
+        case mode of
+          //Passwort im Freitext einer HTML-Seite
+          1: exit(TStubReply.Make(400,'<html>Invalid credentials: '+password+'</html>'));
+          //Passwort mit JSON-Escape: / als \/
+          2: exit(TStubReply.Make(400,'{"error":"invalid_grant","error_description":"Invalid credentials: '+
+               StringReplace(password,'/','\/',[rfReplaceAll])+'"}'));
+          //Passwort in der Statuszeile, leerer Koerper
+          3: begin
+               Result := TStubReply.Make(400,'');
+               Result.StatusText := 'Invalid credentials '+password;
+               exit;
+             end;
+          //Anmeldung gelingt, der Artikelabruf spiegelt den Token
+          4: exit(TStubReply.Make(200,CStubTokenResponse));
+          //Passwort als Hostname einer Weiterleitung
+          5: exit(TStubReply.Redirect(307,'https://'+password+'.example/x'));
+          //Passwort durch ein HTML-Tag zerteilt
+          6: exit(TStubReply.Make(400,'<html>Invalid credentials: '+Copy(password,1,7)+
+               '<b>'+Copy(password,8,MaxInt)+'</b></html>'));
+          //einzelner JSON-String mit Escape
+          7: exit(TStubReply.Make(400,'"Invalid credentials: '+
+               StringReplace(password,'/','\/',[rfReplaceAll])+'"'));
+          //zurueckgespiegelter Formularwert, URL-kodiert. Ohne das Wort
+          //password, sonst verbirgt schon die Schluesselwortpruefung alles.
+          9: exit(TStubReply.Make(400,'Wert abgelehnt: '+StubRawFormValue(_Request.Body,'password')));
+          //abgeschnittenes JSON, Anfuehrungszeichen und Schraegstrich maskiert
+          10: exit(TStubReply.Make(400,'{"error":"Denied '+
+                StringReplace(StringReplace(password,'"','\"',[rfReplaceAll]),'/','\/',[rfReplaceAll])));
+          //abgeschnittenes JSON mit Escape
+          8: exit(TStubReply.Make(400,'{"error":"invalid_grant","error_description":"Invalid credentials: '+
+               StringReplace(password,'/','\/',[rfReplaceAll])));
+        else
+          exit(TStubReply.Make(400,'{"error":"invalid_grant","error_description":"Invalid credentials: '+
+            password+'"}'));
+        end;
+      Result := TStubReply.Make(403,'{"error":"Denied '+Copy(_Request.Authorization,8,MaxInt)+'"}');
+      Result.StatusText := 'Forbidden '+Copy(_Request.Authorization,8,MaxInt);
+    end);
+  try
+    configuration := TOpenMasterdataConfiguration.Defaults;
+    configuration.Username := 'user';
+    configuration.Password := 'GEHEIM-123';
+    configuration.OAuthURL := server.Url(CStubOAuthPath);
+    configuration.BySupplierPIDURL := server.Url(CStubProductPath);
+    configuration.MaxRetries := 0;
+    client := TOpenMasterdataApiClient.Create('stub','user','GEHEIM-123','','','','',
+      configuration.GrantType,configuration.DataPackagesSendMode);
+    client.ApplyConfiguration(configuration);
+
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('Anmeldung scheitert',not response.Success);
+    Check('Passwort nicht in der Meldung',Pos('GEHEIM-123',response.ErrorMessage) = 0,response.ErrorMessage);
+    Check('Meldung des Servers bleibt sonst lesbar',Pos('Invalid credentials',response.ErrorMessage) > 0,response.ErrorMessage);
+
+    //Ein sehr kurzes Passwort laesst sich nicht ersetzen, ohne den Text zu
+    //zerstoeren; dann entfaellt der Text des Servers
+    configuration.Password := 'xQ';
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('kurzes Passwort nicht in der Meldung',Pos('xQ',response.ErrorMessage) = 0,response.ErrorMessage);
+    Check('trotzdem eine Meldung',response.ErrorMessage <> '');
+
+    CheckLogin(1,'GEHEIM-234','HTML-Seite');
+    CheckLogin(2,'GEHEIM/345','JSON-Escape');
+    CheckLogin(3,'GEHEIM-456','Statuszeile');
+    CheckLogin(5,'geheim-678','Weiterleitungsziel');
+    CheckLogin(6,'GEHEIM-789','HTML-Tag im Passwort');
+    CheckLogin(7,'GEHEIM/891','einzelner JSON-String');
+    CheckLogin(8,'GEHEIM/912','abgeschnittenes JSON');
+    CheckLogin(9,'GEHEIM/923','zurueckgespiegeltes Formular');
+    CheckLogin(10,'ABC"DEF/GHI','kombinierte JSON-Escapes');
+    //! kodiert der REST-Client als %21, TNetEncoding.URL laesst es stehen
+    CheckLogin(9,'GEHEIM!123','Formularwert mit !');
+
+    //Bei 403 wird der Token verworfen, bevor die Meldung entsteht
+    mode := 4;
+    configuration.Password := 'GEHEIM-567';
+    client.ApplyConfiguration(configuration);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    CheckEqualsInt('Artikelabruf abgelehnt',403,response.StatusCode);
+    Check('Token nicht in der Meldung',Pos('tok-1',response.ErrorMessage) = 0,response.ErrorMessage);
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubResponseWithoutProduct;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+begin
+  Writeln('HTTP: Status 200 ohne Produkt');
+
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      if Pos('supplierPid=LEER',_Request.Query) > 0 then
+        exit(TStubReply.Make(200,'{}'));
+      if Pos('supplierPid=FEHLER',_Request.Query) > 0 then
+        exit(TStubReply.Make(200,'{"error":"not found"}'));
+      if Pos('supplierPid=NULLFELD',_Request.Query) > 0 then
+        exit(TStubReply.Make(200,'{"error":"not found","supplierPid":null,"basic":null}'));
+      //Wie ZVSHK: Produkt ohne supplierPid
+      Result := TStubReply.Make(200,'{"gtin":"4001234567890","basic":{"productShortDescr":"ohne Nummer"}}');
+    end);
+  try
+    client := CreateStubClient(server,0);
+
+    response := client.FetchBySupplierPid('LEER');
+    try
+      Check('leeres Objekt ist kein Erfolg',not response.Success);
+      Check('Meldung nennt das fehlende Produkt',Pos('kein Produkt',response.ErrorMessage) > 0,response.ErrorMessage);
+      Check('kein Produkt geliefert',response.Product = nil);
+    finally
+      response.Product.Free;
+    end;
+
+    response := client.FetchBySupplierPid('FEHLER');
+    try
+      Check('Fehlerobjekt ist kein Erfolg',not response.Success);
+      Check('Fehlerobjekt liefert kein Produkt',response.Product = nil);
+    finally
+      response.Product.Free;
+    end;
+
+    response := client.FetchBySupplierPid('NULLFELD');
+    try
+      Check('Fehlerobjekt mit null-Feldern ist kein Erfolg',not response.Success);
+      Check('null-Felder liefern kein Produkt',response.Product = nil);
+    finally
+      response.Product.Free;
+    end;
+
+    response := client.FetchBySupplierPid('OHNE');
+    try
+      Check('Produkt ohne supplierPid bleibt gueltig',response.Success,response.ErrorMessage);
+      if Assigned(response.Product) then
+        CheckEqualsStr('Inhalt gelesen','ohne Nummer',response.Product.basic.productShortDescr);
+    finally
+      response.Product.Free;
+    end;
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubRefreshLogin;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  requests : TArray<TStubRequest>;
+  request : TStubRequest;
+  refreshBody, lastAuthorization : String;
+  oauthCalls : Integer;
+begin
+  Writeln('HTTP: Erneuerung des Tokens');
+
+  oauthCalls := 0;
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+      begin
+        //Eine Sekunde Laufzeit, danach muss der Client erneuern
+        if TInterlocked.Increment(oauthCalls) = 1 then
+          exit(TStubReply.Make(200,'{"access_token":"tok-1","refresh_token":"rt-1","expires_in":1}'));
+        exit(TStubReply.Make(200,'{"access_token":"tok-2","refresh_token":"rt-2","expires_in":3600}'));
+      end;
+      Result := TStubReply.Make(200,StubProduct('OK'));
+    end);
+  try
+    client := CreateStubClient(server,0);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('erster Abruf gelingt',response.Success,response.ErrorMessage);
+    Sleep(1500);
+    response := client.FetchBySupplierPid('OK');
+    response.Product.Free;
+    Check('Abruf nach Ablauf gelingt',response.Success,response.ErrorMessage);
+
+    requests := server.Requests;
+    refreshBody := '';
+    lastAuthorization := '';
+    for request in requests do
+    begin
+      if (request.Path = CStubOAuthPath) and (StubFormValue(request.Body,'grant_type') = 'refresh_token') then
+        refreshBody := request.Body;
+      if request.Path = CStubProductPath then
+        lastAuthorization := request.Authorization;
+    end;
+    Check('Erneuerung per refresh_token',refreshBody <> '');
+    CheckEqualsStr('mit dem erhaltenen Refresh-Token','rt-1',StubFormValue(refreshBody,'refresh_token'));
+    CheckEqualsStr('neuer Token im Abruf','Bearer tok-2',lastAuthorization);
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestStubWireOptions;
+var
+  server : TStubServer;
+  client : IOpenMasterdataApiClient;
+  response : TOpenMasterdataResponse;
+  configuration : TOpenMasterdataConfiguration;
+  requests : TArray<TStubRequest>;
+  query : String;
+begin
+  Writeln('HTTP: Sendemodus exploded und customerId');
+
+  server := TStubServer.Create(
+    function(const _Request : TStubRequest) : TStubReply
+    begin
+      if _Request.Path = CStubOAuthPath then
+        exit(TStubReply.Make(200,CStubTokenResponse));
+      Result := TStubReply.Make(200,StubProduct('OK'));
+    end);
+  try
+    configuration := TOpenMasterdataConfiguration.Defaults;
+    configuration.Username := 'user';
+    configuration.Password := 'pass';
+    configuration.OAuthURL := server.Url(CStubOAuthPath);
+    configuration.BySupplierPIDURL := server.Url(CStubProductPath);
+    configuration.DataPackagesSendMode := TOpenMasterdataApiClient.TDataPackagesSendMode.omddpsm_Exploded;
+    configuration.CustomerId := 'K 1';
+    configuration.MaxRetries := 0;
+    client := TOpenMasterdataApiClient.Create('stub','user','pass','','','','',
+      configuration.GrantType,configuration.DataPackagesSendMode);
+    client.ApplyConfiguration(configuration);
+
+    response := client.FetchBySupplierPid('OK',[TOpenMasterdataAPI_DataPackage.omd_datapackage_basic,
+                                                 TOpenMasterdataAPI_DataPackage.omd_datapackage_prices]);
+    response.Product.Free;
+    Check('Abruf gelingt',response.Success,response.ErrorMessage);
+
+    query := '';
+    requests := server.Requests;
+    if Length(requests) > 0 then
+      query := requests[High(requests)].Query;
+    Check('ein Parameter je Datenpaket',
+      (Pos('datapackage=basic',query) > 0) and (Pos('datapackage=prices',query) > 0),query);
+    Check('keine verkettete Liste',Pos('|',query) = 0,query);
+    Check('customerId gesendet',Pos('customerId=K',query) > 0,query);
+  finally
+    client := nil;
+    server.Free;
+  end;
+end;
+
+procedure TestReviewParserFixes;
+var
+  item : TOpenMasterdataAPI_Result;
+  err, html : String;
+begin
+  Writeln('Parser und Ansicht: Preisbasis, Ganzzahlen, Datum');
+
+  item := TOpenMasterdataAPI_Result.Create;
+  try
+    Check('Preis mit dezimaler Basis lesbar',item.TryLoadFromJson(
+      '{"supplierPid":"A","prices":{'+
+      '"listPrice":{"value":"222.70","currency":"EUR","basis":100.0,"quantityUnit":"PCE"},'+
+      '"netPrice":{"value":"250.00","currency":"EUR","basis":"100.0","quantityUnit":"PCE"},'+
+      '"taxCode":"19.0"},'+
+      '"logistics":{"standardDeliveryPeriod":"5.0"}}',err),err);
+    CheckEqualsInt('Basis als Zahl 100.0',100,item.prices.listPrice.basis);
+    CheckEqualsInt('Basis als Text "100.0"',100,item.prices.netPrice.basis);
+    CheckEqualsInt('Steuerschluessel "19.0"',19,item.prices.taxCode);
+    CheckEqualsInt('Lieferzeit "5.0"',5,item.logistics.standardDeliveryPeriod);
+
+    html := TOpenMasterdataAPI_ViewHelper.AsHtml(item);
+    Check('Anzeige nennt die Preisbasis',Pos('je 100 PCE',html) > 0);
+  finally
+    item.Free;
+  end;
+
+  //Der geschriebene Kalendertag gilt, unabhaengig von Zeitzone und Uhrzeit
+  CheckEquals('Datum mit Offset im Winter','2026-01-15',
+    AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('2026-01-15T00:00:00+02:00')));
+  CheckEquals('Datum mit Offset im Sommer','2026-04-10',
+    AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('2026-04-10T00:00:00+02:00')));
+  CheckEquals('Datum mit Z','2026-04-21',
+    AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('2026-04-21T23:30:00Z')));
+  CheckEquals('Datum ohne Zeit','2026-04-21',
+    AsIsoDate(TOpenMasterdataAPIHelper.JSONStrToDate('2026-04-21')));
+end;
+
+procedure TestSafeFileNames;
+var
+  item : TOpenMasterdataAPI_Result;
+  model : TOpenMasterdata_Result;
+  err : String;
+begin
+  Writeln('Dateinamen aus der Lieferantenantwort');
+
+  item := TOpenMasterdataAPI_Result.Create;
+  model := TOpenMasterdata_Result.Create;
+  try
+    Check('Antwort lesbar',item.TryLoadFromJson(
+      '{"supplierPid":"A","documents":['+
+      '{"url":"https://x.example/a","filename":"..\\..\\x.bat"},'+
+      '{"url":"https://x.example/b","filename":"C:datei.pdf"},'+
+      '{"url":"https://x.example/c","filename":".."}]}',err),err);
+    model.LoadDataFrom(item);
+    CheckEqualsInt('drei Dokumente',3,model.documents.Count);
+    if model.documents.Count = 3 then
+    begin
+      Check('kein Pfadtrenner',Pos('\',model.documents[0].filename) = 0,model.documents[0].filename);
+      Check('keine Laufwerksangabe',Pos(':',model.documents[1].filename) = 0,model.documents[1].filename);
+      Check('nicht ..',model.documents[2].filename <> '..',model.documents[2].filename);
+    end;
+  finally
+    model.Free;
+    item.Free;
+  end;
+end;
+
+procedure TestOAuthMessageSecrets;
+var
+  message : String;
+begin
+  Writeln('OAuth-Fehlermeldung ohne Geheimnisse');
+
+  message := TOpenMasterdataApiClient.DescribeOAuthFailure(
+    '{"error":"invalid_grant","error_description":"refresh_token RT-GEHEIM wurde abgelehnt"}');
+  Check('Token nicht in der Meldung',Pos('RT-GEHEIM',message) = 0,message);
+  Check('Fehler trotzdem gemeldet',message <> '');
+
+  message := TOpenMasterdataApiClient.DescribeOAuthFailure(
+    '{"error":"'+StringOfChar('x',2000)+'\u001b[31m\nzweite Zeile"}');
+  Check('Feld error wird gekuerzt',Length(message) < 400,IntToStr(Length(message)));
+  Check('keine Steuerzeichen aus error',(Pos(#27,message) = 0) and (Pos(#10,message) = 0));
+end;
+
 function LocateTestresponses : String;
 var
   candidate : String;
@@ -2453,6 +3156,28 @@ begin
     TestStubConfigChangeDuringWait;
     Writeln;
     TestConcurrentConnectionCreation;
+    Writeln;
+    TestStubRedirectNotFollowed;
+    Writeln;
+    TestStubGetDataToken;
+    Writeln;
+    TestStubEndpointChanges;
+    Writeln;
+    TestStubGetDataRenewedToken;
+    Writeln;
+    TestStubResponseWithoutProduct;
+    Writeln;
+    TestStubOwnSecretsMasked;
+    Writeln;
+    TestStubRefreshLogin;
+    Writeln;
+    TestStubWireOptions;
+    Writeln;
+    TestReviewParserFixes;
+    Writeln;
+    TestSafeFileNames;
+    Writeln;
+    TestOAuthMessageSecrets;
     Writeln;
 
     if ParamCount > 0 then

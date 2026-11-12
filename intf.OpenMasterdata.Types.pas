@@ -829,6 +829,12 @@ type
 
 implementation
 
+//Ganzzahl aus einem JSON-Wert. Auch eine dezimal geschriebene Ganzzahl wie
+//"100.0" oder 100.0 gilt; StrToIntDef wuerde sie verwerfen und etwa bei der
+//Preisbasis aus "je 100 Stueck" stillschweigend "je Stueck" machen. Ein echter
+//Kommawert oder Unlesbares ergibt _Default.
+function JSONStrToIntDef(const _Val : String; _Default : Integer) : Integer; forward;
+
 { TOpenMasterdataAPI_AuthResultHelper }
 
 procedure TOpenMasterdataAPI_AuthResultHelper.LoadFromJson(
@@ -1119,7 +1125,7 @@ var
     if TryGetString(_Val,'currency',scalarValue) then
       _Result.currency := scalarValue;
     if TryGetString(_Val,'basis',scalarValue) then
-      _Result.basis := StrToIntDef(scalarValue,1);
+      _Result.basis := JSONStrToIntDef(scalarValue,1);
     if TryGetString(_Val,'quantityUnit',scalarValue) then
       _Result.quantityUnit := scalarValue;
     //Ab OM 11 bei Staffelpreisen
@@ -1380,7 +1386,7 @@ begin
       end;
 
       if TryGetString(jsonValue,'taxCode',valueAsString) then
-        prices.taxCode := StrToIntDef(valueAsString,0);
+        prices.taxCode := JSONStrToIntDef(valueAsString,0);
       if TryGetString(jsonValue,'billBasis',valueAsString) then
         prices.billBasis := valueAsString;
       if jsonValue.TryGetValue<TJSONArray>('rawMaterial',jsonArray) then
@@ -1624,7 +1630,7 @@ begin
       if jsonValue.TryGetValue<TJSONBool>('exportable',jsonBool) then
         logistics.exportable := jsonBool.AsBoolean;
       if TryGetString(jsonValue,'commodityNumber',valueAsString) then
-        logistics.commodityNumber := StrToIntDef(valueAsString,0);
+        logistics.commodityNumber := JSONStrToIntDef(valueAsString,0);
       if TryGetString(jsonValue,'countryOfOrigin',valueAsString) then
         logistics.countryOfOrigin := valueAsString;
       if jsonValue.TryGetValue<TJSONBool>('hazardousMaterial',jsonBool) then
@@ -1637,9 +1643,9 @@ begin
       if TryGetString(jsonValue,'reachData',valueAsString) then
         logistics.reachDate := TOpenMasterdataAPIHelper.JSONStrToDate(valueAsString);
       if TryGetString(jsonValue,'durabilityPeriod',valueAsString) then
-        logistics.durabilityPeriod := StrToIntDef(valueAsString,0);
+        logistics.durabilityPeriod := JSONStrToIntDef(valueAsString,0);
       if TryGetString(jsonValue,'standardDeliveryPeriod',valueAsString) then
-        logistics.standardDeliveryPeriod := StrToIntDef(valueAsString,0);
+        logistics.standardDeliveryPeriod := JSONStrToIntDef(valueAsString,0);
       if TryGetString(jsonValue,'lucidNumber',valueAsString) then
         logistics.lucidNumber := valueAsString;
       if TryGetString(jsonValue,'packagingDisposalProvider',valueAsString) then
@@ -1668,7 +1674,7 @@ begin
       if TryGetString(jsonValue,'weeeNumber',valueAsString) then
         logistics.weeeNumber := valueAsString;
       if TryGetString(jsonValue,'packagingQuantity',valueAsString) then
-        logistics.packagingQuantity := StrToIntDef(valueAsString,0);
+        logistics.packagingQuantity := JSONStrToIntDef(valueAsString,0);
       if jsonValue.TryGetValue<TJSONArray>('packagingUnits',jsonArray) then
       for jsonValue2 in jsonArray do
       begin
@@ -1847,6 +1853,23 @@ begin
     end;
     //kein bekanntes 8-stelliges Format, weiter mit den allgemeinen Fallbacks
   end;
+  //Ein ISO-Datum meint den Kalendertag, den der Lieferant schreibt. Ueber
+  //TryISO8601ToDate gelesen, wuerde es nach UTC und zurueck in Ortszeit
+  //gerechnet: ohne Zeitzone gilt es dort als UTC, und mit einer Zeitzone wie
+  //+02:00 an einem Wintertag faellt es in Deutschland auf 23 Uhr des Vortags.
+  //Uhrzeit und Zeitzone werden deshalb nicht ausgewertet.
+  if (Length(_Val) >= 10) and (_Val[5] = '-') and (_Val[8] = '-') and
+     ((Length(_Val) = 10) or CharInSet(_Val[11],['T','t',' '])) then
+  begin
+    yearPart := StrToIntDef(Copy(_Val,1,4),0);
+    monthPart := StrToIntDef(Copy(_Val,6,2),0);
+    dayPart := StrToIntDef(Copy(_Val,9,2),0);
+    if TryEncodeDate(yearPart,monthPart,dayPart,parsedDate) then
+    begin
+      Result := DateOf(parsedDate);
+      exit;
+    end;
+  end;
   if TryISO8601ToDate(_Val,isoDate,false) then
   begin
     Result := DateOf(isoDate);
@@ -1855,6 +1878,25 @@ begin
 
   if TryStrToDate(_Val,isoDate) then
     Result := DateOf(isoDate);
+end;
+
+function JSONStrToIntDef(const _Val : String; _Default : Integer) : Integer;
+var
+  value : String;
+  floatValue : Double;
+begin
+  value := Trim(_Val);
+  if TryStrToInt(value,Result) then
+    exit;
+  Result := _Default;
+  if value = '' then
+    exit;
+  floatValue := TOpenMasterdataAPIHelper.JSONStrToFloat(value);
+  if (floatValue = 0) or (Frac(floatValue) <> 0) then
+    exit;
+  if (floatValue > MaxInt) or (floatValue < -MaxInt) then
+    exit;
+  Result := Trunc(floatValue);
 end;
 
 class function TOpenMasterdataAPIHelper.JSONStrToFloat(_Val: String): double;

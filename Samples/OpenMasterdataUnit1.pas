@@ -442,6 +442,11 @@ begin
     end;
     EdgeBrowser1.NavigateToString(html);
 
+    //Bei 950 und 951 kommt ein anderer als der angefragte Artikel. Ohne
+    //Hinweis haelt der Anwender den Ersatz fuer den bestellten Artikel.
+    if supplierPid.StatusHint <> '' then
+      MessageDlg(supplierPid.StatusHint, mtInformation, [mbOK], 0);
+
     for i := 0 to supplierPid.pictures.Count-1 do
     begin
       ListBox2.Items.Add(supplierPid.pictures[i].url);

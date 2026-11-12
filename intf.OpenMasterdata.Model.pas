@@ -179,6 +179,22 @@ type
 
 implementation
 
+//Dateinamen kommen vom Lieferanten. Pfadtrenner, Laufwerksangaben und die
+//Namen . und .. wuerden einen damit gebildeten Pfad aus dem Zielordner
+//herausfuehren; sie und andere unter Windows unzulaessige Zeichen werden
+//ersetzt.
+function SafeFileName(const _Value : String) : String;
+var
+  i : Integer;
+begin
+  Result := _Value;
+  for i := 1 to Length(Result) do
+    if (Result[i] < ' ') or CharInSet(Result[i],['/','\',':','*','?','"','<','>','|']) then
+      Result[i] := '_';
+  if (Result = '.') or (Result = '..') then
+    Result := '_';
+end;
+
 { TOpenMasterdata_Prices }
 
 constructor TOpenMasterdata_Prices.Create;
@@ -242,7 +258,7 @@ begin
     var document : TOpenMasterdata_Document := TOpenMasterdata_Document.Create;
     document.url := _Val.documents[i].url;
     document.type_ := TOpenMasterdata_DocumentTypeHelper.FromString(_Val.documents[i].type_);
-    document.filename := ReplaceText(_Val.documents[i].filename,'/','_');
+    document.filename := SafeFileName(_Val.documents[i].filename);
     document.size := _Val.documents[i].size;
     document.hash := _Val.documents[i].hash;
     documents.Add(document);
@@ -289,7 +305,7 @@ begin
     picture.type_ := TOpenMasterdata_PictureTypeHelper.FromString(_Val.pictures[i].type_);
     picture.use := _Val.pictures[i].use;
     picture.substituteId := _Val.pictures[i].substituteId;
-    picture.filename := ReplaceText(_Val.pictures[i].filename,'/','_');
+    picture.filename := SafeFileName(_Val.pictures[i].filename);
     picture.size := _Val.pictures[i].size;
     picture.hash := _Val.pictures[i].hash;
     pictures.Add(picture);
