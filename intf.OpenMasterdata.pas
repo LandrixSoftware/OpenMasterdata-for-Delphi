@@ -33,7 +33,7 @@ uses
   //Fuer TOpenMasterdataConfiguration.LoadFromIni. TCustomIniFile ist Teil
   //der RTL, es kommt keine fremde Abhaengigkeit hinzu.
   ,System.IniFiles
-  ,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client
+  ,System.JSON,REST.Json,REST.JsonReflect, REST.Types, REST.Client, REST.Utils
   ,intf.OpenMasterdata.Types
   ;
 
@@ -204,13 +204,21 @@ type
 
     FAccessToken : String;
     FRefreshToken : String;
-    FAccessTokenValidTo : TDateTime;
+    //Ablauf als TThread.GetTickCount64. Eine Ortszeit wuerde bei der
+    //Zeitumstellung um eine Stunde springen und den Token zu lange gelten lassen.
+    FAccessTokenValidUntil : UInt64;
     //FCookie : String;
 
     FOAuthUrl : String;
     FBySupplierPIDUrl : String;
     FByManufacturerDataUrl : String;
     FByGTINUrl : String;
+    //Die Adressen, wie sie gesetzt wurden. Nur eine tatsaechliche Aenderung
+    //verwirft den Token; ApplyConfiguration setzt alle Adressen bei jedem Aufruf.
+    FOAuthUrlSource : String;
+    FBySupplierPIDUrlSource : String;
+    FByManufacturerDataUrlSource : String;
+    FByGTINUrlSource : String;
 
     FRESTClientOAuth: TRESTClient;
     FRESTClientBySupplierPID: TRESTClient;
@@ -232,28 +240,36 @@ type
     function LoggedIn: Boolean;
     function Login : Boolean;
     function RefreshLogin : Boolean;
-    function CalculateTokenValidTo(_ExpiresInSeconds : Integer) : TDateTime;
+    function CalculateTokenValidUntil(_ExpiresInSeconds : Integer) : UInt64;
+    procedure DiscardTokens;
+    //Setzt Adresse und Basisadresse eines Endpunkts. Eine leere oder
+    //ungueltige Adresse schaltet ihn ganz ab, auch die Basisadresse.
+    procedure ApplyEndpointUrl(const _URL : String; _RestClient : TRESTClient;
+      var _Resource, _Source : String; _ProductEndpoint : Boolean);
+    //Ob der Zugriffstoken an diese Adresse gehen darf: nur an den Ursprung
+    //eines konfigurierten Produktendpunkts
+    function TokenAllowedFor(const _Url : String) : Boolean;
+    //Was in keiner Meldung stehen darf
+    function OwnSecrets : TArray<String>;
 
     //Fuehrt den Request aus und wiederholt ihn bei Ueberlast-Status.
     //Liefert false, wenn der Aufruf mit einer Exception endete.
     function ExecuteWithRetry(_Request : TRESTRequest; _Response : TRESTResponse) : Boolean;
     function TrySplitEndpointUrl(const _URL : String; out _Resource, _BaseUrl : String) : Boolean;
-    //Liest die Adresse eines Endpunkts unter der Sperre. Der Endpunkt wird
-    //ueber das Enum ausgewaehlt und nicht als const-String uebergeben: bei
-    //const erhoeht Delphi den Referenzzaehler nicht, und der Zeiger waere
-    //bereits vor dem Acquire geladen.
-    function ReadEndpointUrl(_Endpoint : TEndpointKind) : String;
     function SleepWithoutLock(_Milliseconds : Integer) : Boolean;
     procedure SetupProductRestClient(_RestClient : TRESTClient; const _BaseUrl : String);
     class function StatusCodeToMessage(_StatusCode : Integer; const _StatusText : String) : String; static;
     //_StatusCode und _ErrorMessage werden noch unter der Sperre eingesammelt.
     //Wer sie erst danach ueber GetLastErrorCode liest, kann die Werte eines
     //anderen Threads erwischen, der in der Zwischenzeit angefragt hat.
-    function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource, _IdentifierName, _IdentifierValue : String;
+    //Der Endpunkt wird als Enum uebergeben und erst unter der Sperre
+    //aufgeloest. Vorher gelesen, koennte ein anderer Thread dazwischen die
+    //Konfiguration wechseln, und der alte Pfad liefe mit neuem Host.
+    function ExecuteProductRequest(_Endpoint : TEndpointKind; const _IdentifierName, _IdentifierValue : String;
       _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
       out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
-    function ExecuteProductRequest(_RestClient : TRESTClient; const _Resource,
-      _IdentifierName1, _IdentifierValue1, _IdentifierName2, _IdentifierValue2,
+    function ExecuteProductRequest(_Endpoint : TEndpointKind;
+      const _IdentifierName1, _IdentifierValue1, _IdentifierName2, _IdentifierValue2,
       _IdentifierName3, _IdentifierValue3 : String; _DataPackages : TOpenMasterdataAPI_DataPackages;
       out _Result: TOpenMasterdataAPI_Result;
       out _StatusCode : Integer; out _ErrorMessage : String) : Boolean; overload;
@@ -496,6 +512,169 @@ begin
   Result := Trim(_Message+' '+detail);
 end;
 
+const
+  CHiddenServerText = '(Text des Servers nicht angezeigt, er enthaelt Zugangsdaten)';
+  CMinMaskLength = 4;
+
+//Ein Geheimnis in den Schreibweisen, in denen es in einem Text vom Server
+//stehen kann: wie es ist, als JSON-String kodiert (etwa / als \/) und
+//URL-kodiert, wie im Formular der Anmeldung, das manche Server zurueckspiegeln
+function SecretVariants(const _Secret : String) : TArray<String>;
+
+  procedure Add(const _Variant : String);
+  var
+    existing : String;
+  begin
+    for existing in Result do
+      if existing = _Variant then
+        exit;
+    Result := Result + [_Variant];
+  end;
+
+var
+  jsonString : TJSONString;
+  encoded : String;
+begin
+  Result := [_Secret];
+  jsonString := TJSONString.Create(_Secret);
+  try
+    encoded := jsonString.ToJSON;
+  finally
+    jsonString.Free;
+  end;
+  //ToJSON liefert den Wert in Anfuehrungszeichen
+  encoded := Copy(encoded,2,Length(encoded)-2);
+  Add(encoded);
+  //Der Schraegstrich darf in JSON maskiert sein oder nicht, unabhaengig von
+  //den uebrigen Escapes; beide Fassungen werden gesucht
+  Add(StringReplace(encoded,'/','\/',[rfReplaceAll]));
+  Add(StringReplace(_Secret,'/','\/',[rfReplaceAll]));
+  Add(TNetEncoding.URL.Encode(_Secret));
+  //So kodiert TRESTRequest die Formularwerte der Anmeldung; strenger als
+  //TNetEncoding.URL, etwa ! als %21
+  Add(URIEncode(_Secret));
+end;
+
+//Kopie eines JSON-Werts, in der die eigenen Geheimnisse in allen Strings und
+//Schluesseln ersetzt sind. Gearbeitet wird auf den dekodierten Werten: im
+//Rohtext koennte ein Geheimnis durch Escapes wie \/ oder \u0041 unkenntlich
+//sein. _TooShort meldet ein Geheimnis, das sich nicht ersetzen laesst.
+function MaskJsonValue(_Value : TJSONValue; const _Secrets : TArray<String>;
+  var _TooShort : Boolean) : TJSONValue;
+
+  function MaskText(const _Text : String) : String;
+  var
+    secret : String;
+  begin
+    Result := _Text;
+    for secret in _Secrets do
+    begin
+      if (secret = '') or (Pos(secret,Result) = 0) then
+        continue;
+      if Length(secret) < CMinMaskLength then
+        _TooShort := true
+      else
+        Result := StringReplace(Result,secret,'***',[rfReplaceAll]);
+    end;
+  end;
+
+var
+  pair : TJSONPair;
+  element : TJSONValue;
+begin
+  if _Value is TJSONObject then
+  begin
+    Result := TJSONObject.Create;
+    for pair in TJSONObject(_Value) do
+      TJSONObject(Result).AddPair(MaskText(pair.JsonString.Value),
+        MaskJsonValue(pair.JsonValue,_Secrets,_TooShort));
+  end
+  else
+  if _Value is TJSONArray then
+  begin
+    Result := TJSONArray.Create;
+    for element in TJSONArray(_Value) do
+      TJSONArray(Result).AddElement(MaskJsonValue(element,_Secrets,_TooShort));
+  end
+  else
+  //TJSONNumber ist von TJSONString abgeleitet und bleibt, wie er ist
+  if (_Value is TJSONString) and not (_Value is TJSONNumber) then
+    Result := TJSONString.Create(MaskText(TJSONString(_Value).Value))
+  else
+    Result := TJSONValue(_Value.Clone);
+end;
+
+//Ersetzt die eigenen Zugangsdaten in einem Text vom Server durch ***. Ein
+//beliebiges Geheimnis laesst sich nicht erkennen, die eigenen aber schon: manche
+//Server spiegeln das abgelehnte Passwort oder den Token in Statuszeile oder
+//Koerper. Jeder Servertext laeuft hier durch, bevor er gekuerzt oder sonst
+//weiterverarbeitet wird; sonst bliebe der Anfang eines zerschnittenen
+//Geheimnisses stehen. Ein Geheimnis unter vier Zeichen laesst sich nicht
+//ersetzen, ohne den Text zu zerstoeren; dann tritt ein Hinweis an seine Stelle.
+function MaskSecrets(const _Text : String; const _Secrets : TArray<String>) : String;
+var
+  jsonValue, masked : TJSONValue;
+  tooShort : Boolean;
+  secret, variant : String;
+begin
+  Result := _Text;
+  if Result = '' then
+    exit;
+
+  tooShort := false;
+  jsonValue := nil;
+  try
+    jsonValue := TJSONObject.ParseJSONValue(Result);
+  except
+    on E:Exception do
+      jsonValue := nil;
+  end;
+  if (jsonValue is TJSONObject) or (jsonValue is TJSONArray) or
+     ((jsonValue is TJSONString) and not (jsonValue is TJSONNumber)) then
+  try
+    masked := MaskJsonValue(jsonValue,_Secrets,tooShort);
+    try
+      Result := masked.ToString;
+    finally
+      masked.Free;
+    end;
+  finally
+    jsonValue.Free;
+  end
+  else
+    jsonValue.Free;
+
+  //Auch nach der JSON-Bereinigung: fuer Text ausserhalb von Strings und fuer
+  //JSON, das sich nicht parsen laesst, etwa eine abgeschnittene Antwort
+  for secret in _Secrets do
+  begin
+    if secret = '' then
+      continue;
+    for variant in SecretVariants(secret) do
+    begin
+      if Pos(variant,Result) = 0 then
+        continue;
+      if Length(secret) < CMinMaskLength then
+        tooShort := true
+      else
+        Result := StringReplace(Result,variant,'***',[rfReplaceAll]);
+    end;
+  end;
+  if tooShort then
+    Result := CHiddenServerText;
+end;
+
+function OAuthJsonErrorMessage(const _Content : String) : String; forward;
+
+//Erlaeutert eine OAuth-Antwort fuer die Meldung. Erwartet bereits maskierten Text.
+function OAuthDetail(const _MaskedContent : String) : String;
+begin
+  if _MaskedContent = CHiddenServerText then
+    Result := _MaskedContent
+  else
+    Result := OAuthJsonErrorMessage(_MaskedContent);
+end;
+
 function OAuthJsonErrorMessage(const _Content : String) : String;
 var
   trimmedContent,errorCode,errorDescr : String;
@@ -530,10 +709,15 @@ begin
       if (errorCode <> '') or (errorDescr <> '') then
       begin
         Result := 'OAuth server reported an error';
+        //Beide Texte kommen vom Server. Die eigenen Zugangsdaten hat
+        //MaskSecrets schon ersetzt; deutet ein Schluesselwort auf ein
+        //anderes Geheimnis, wird keiner gezeigt.
+        if MayContainSecret(errorCode) or MayContainSecret(errorDescr) then
+          exit(Result + ' (Text nicht angezeigt, er enthaelt moeglicherweise Zugangsdaten)');
+        //Auch error wird fuer Freitext benutzt und kann beliebig lang sein
         if errorCode <> '' then
-          Result := Result + ' (' + errorCode + ')';
+          Result := Result + ' (' + ShortenForMessage(NormalizeSingleLine(errorCode)) + ')';
         if errorDescr <> '' then
-          //Auch dieser Text kommt vom Server und kann beliebig lang sein
           Result := Result + ': ' + ShortenForMessage(NormalizeSingleLine(errorDescr));
         exit;
       end;
@@ -551,8 +735,146 @@ begin
   Result := 'OAuth response is not valid JSON: ' + SafeResponsePreview(trimmedContent);
 end;
 
-function TryLoadAuthResult(const _Content : String; out _AuthResult : TOpenMasterdataAPI_AuthResult;
-  out _ErrorMessage : String) : Boolean;
+function BuildRestBaseUrl(const _Url : TURI) : String;
+begin
+  Result := _Url.Scheme+'://'+_Url.Host;
+  //TURI setzt bei fehlender Portangabe den Standardport des Schemas ein.
+  //Diesen wieder anzuhaengen ist ueberfluessig und stoert Gegenstellen mit
+  //strikter Pruefung des Host-Headers.
+  if (_Url.Port > 0) and
+     not (SameText(_Url.Scheme,'https') and (_Url.Port = 443)) and
+     not (SameText(_Url.Scheme,'http') and (_Url.Port = 80)) then
+    Result := Result + ':' + _Url.Port.ToString;
+end;
+
+function IsRedirectStatus(_StatusCode : Integer) : Boolean;
+begin
+  Result := (_StatusCode >= 300) and (_StatusCode < 400) and (_StatusCode <> 304);
+end;
+
+//Absolut ist eine Adresse, die mit einem Schema wie https:// beginnt. Ein
+//beliebiges Vorkommen von :// genuegt nicht, es kann auch in einer Query
+//stehen: ?source=https://cdn.example/x
+function IsAbsoluteUrl(const _Value : String) : Boolean;
+var
+  colon, i : Integer;
+begin
+  Result := false;
+  colon := Pos(':',_Value);
+  if (colon < 2) or (Copy(_Value,colon+1,2) <> '//') then
+    exit;
+  if not CharInSet(_Value[1],['A'..'Z','a'..'z']) then
+    exit;
+  for i := 2 to colon-1 do
+    if not CharInSet(_Value[i],['A'..'Z','a'..'z','0'..'9','+','-','.']) then
+      exit;
+  Result := true;
+end;
+
+//Loest die Location einer Weiterleitung gegen die angefragte Adresse auf
+function ResolveLocation(const _Current, _Location : String) : String;
+var
+  current : TURI;
+  slash : Integer;
+begin
+  Result := Trim(_Location);
+  if (Result = '') or IsAbsoluteUrl(Result) then
+    exit;
+  //Ein Fragment geht nie an den Server: die Adresse bleibt, wie sie war,
+  //samt Dateiname und Query
+  if Result.StartsWith('#') then
+  begin
+    Result := _Current;
+    if Pos('#',Result) > 0 then
+      Result := Copy(Result,1,Pos('#',Result)-1);
+    exit;
+  end;
+  try
+    current := TURI.Create(_Current);
+  except
+    on E:Exception do
+      exit('');
+  end;
+  if Result.StartsWith('//') then
+    Result := current.Scheme+':'+Result
+  else
+  //Nur eine neue Query: Pfad samt Dateiname bleiben
+  if Result.StartsWith('?') then
+    Result := BuildRestBaseUrl(current)+current.Path+Result
+  else
+  if Result.StartsWith('/') then
+    Result := BuildRestBaseUrl(current)+Result
+  else
+  begin
+    slash := LastDelimiter('/',current.Path);
+    Result := BuildRestBaseUrl(current)+Copy(current.Path,1,slash)+Result;
+  end;
+end;
+
+//Nennt nur den Host des Ziels: die vollstaendige Adresse kann Parameter
+//enthalten, die nicht in eine Meldung gehoeren
+function RedirectMessage(const _Target : String) : String;
+var
+  host : String;
+begin
+  host := '';
+  try
+    if _Target <> '' then
+      host := TURI.Create(_Target).Host;
+  except
+    on E:Exception do
+      host := '';
+  end;
+  Result := 'Der Server leitet weiter';
+  if host <> '' then
+    Result := Result+' an '+host;
+  Result := Result+'. Weiterleitungen werden nicht verfolgt, damit Token und '+
+            'Zugangsdaten nicht an eine andere Adresse gehen. Bitte die '+
+            'konfigurierte URL pruefen.';
+end;
+
+//Ein JSON-Objekt ohne eines der Produktfelder ist kein Produkt, sondern etwa
+//{} oder ein Fehlerobjekt wie {"error":"not found"}, auch wenn der Server es
+//mit Status 200 schickt. supplierPid allein taugt nicht als Merkmal, einzelne
+//Lieferanten lassen es weg.
+function IsObjectWithoutProduct(const _Content : String) : Boolean;
+const
+  CProductFields : array[0..11] of String = ('supplierPid','gtin','manufacturerId',
+    'manufacturerPid','basic','additional','prices','descriptions','logistics',
+    'sparepartlists','pictures','documents');
+var
+  jsonValue : TJSONValue;
+  fieldValue : TJSONValue;
+  field : String;
+begin
+  Result := false;
+  jsonValue := TJSONObject.ParseJSONValue(_Content);
+  if jsonValue = nil then
+    exit;
+  try
+    if not (jsonValue is TJSONObject) then
+      exit;
+    //Ein Feld mit null oder leerem Text traegt nichts, etwa in
+    //{"error":"not found","supplierPid":null}
+    for field in CProductFields do
+    begin
+      fieldValue := TJSONObject(jsonValue).GetValue(field);
+      if (fieldValue = nil) or (fieldValue is TJSONNull) then
+        continue;
+      if (fieldValue is TJSONString) and (Trim(TJSONString(fieldValue).Value) = '') then
+        continue;
+      exit;
+    end;
+    Result := true;
+  finally
+    jsonValue.Free;
+  end;
+end;
+
+//_Content ist die Antwort, aus der der Token gelesen wird. Meldungen entstehen
+//aus _MaskedContent, derselben Antwort mit ersetzten eigenen Zugangsdaten.
+function TryLoadAuthResult(const _Content, _MaskedContent : String;
+  out _AuthResult : TOpenMasterdataAPI_AuthResult; out _ErrorMessage : String) : Boolean;
 begin
   Result := false;
   _AuthResult := nil;
@@ -560,7 +882,7 @@ begin
 
   if Trim(_Content) = '' then
   begin
-    _ErrorMessage := OAuthJsonErrorMessage(_Content);
+    _ErrorMessage := OAuthDetail(_MaskedContent);
     exit;
   end;
 
@@ -571,7 +893,7 @@ begin
     except
       on E:Exception do
       begin
-        _ErrorMessage := OAuthJsonErrorMessage(_Content);
+        _ErrorMessage := OAuthDetail(_MaskedContent);
         if E.Message <> '' then
           _ErrorMessage := _ErrorMessage + ' (' + E.Message + ')';
         FreeAndNil(_AuthResult);
@@ -581,7 +903,7 @@ begin
 
     if _AuthResult.access_token.IsEmpty then
     begin
-      _ErrorMessage := OAuthJsonErrorMessage(_Content);
+      _ErrorMessage := OAuthDetail(_MaskedContent);
       FreeAndNil(_AuthResult);
       exit;
     end;
@@ -697,18 +1019,6 @@ begin
   end;
 end;
 
-function BuildRestBaseUrl(const _Url : TURI) : String;
-begin
-  Result := _Url.Scheme+'://'+_Url.Host;
-  //TURI setzt bei fehlender Portangabe den Standardport des Schemas ein.
-  //Diesen wieder anzuhaengen ist ueberfluessig und stoert Gegenstellen mit
-  //strikter Pruefung des Host-Headers.
-  if (_Url.Port > 0) and
-     not (SameText(_Url.Scheme,'https') and (_Url.Port = 443)) and
-     not (SameText(_Url.Scheme,'http') and (_Url.Port = 80)) then
-    Result := Result + ':' + _Url.Port.ToString;
-end;
-
 function BuildExplodedDataPackageResource(const _Resource : String;
   _DataPackages : TOpenMasterdataAPI_DataPackages) : String;
 var
@@ -765,30 +1075,25 @@ class function TOpenMasterdataApiClient.NewOpenMasterdataConnection(
   _ClientSecret,_ClientScope: String;
   _GrantType : TGrantType; _DataPackagesSendMode : TDataPackagesSendMode): IOpenMasterdataApiClient;
 var
-  i : Integer;
+  configuration : TOpenMasterdataConfiguration;
 begin
-  Result := nil;
-  EnsureOpenConnectionsInitialized;
-  openConnectionsCS.Acquire;
-  try
-    for i := 0 to openConnections.Count-1 do
-    if SameText(_ConnectionName,
-              IOpenMasterdataApiClient(openConnections[i]).GetConnectionName) then
-    begin
-      Result := IOpenMasterdataApiClient(openConnections[i]);
-      //Eine bestehende Verbindung wird weiterverwendet, die uebergebenen
-      //Zugangsdaten duerfen dabei aber nicht verlorengehen
-      Result.SetCredentials(_Username,_Password,_CustomerNumber,_ClientID,
-        _ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
-      exit;
-    end;
-
-    Result := TOpenMasterdataApiClient.Create(_ConnectionName,_Username, _Password,
-                 _CustomerNumber,_ClientID,_ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
-    openConnections.Add(Result);
-  finally
-    openConnectionsCS.Release;
-  end;
+  configuration := TOpenMasterdataConfiguration.Defaults;
+  configuration.Username := _Username;
+  configuration.Password := _Password;
+  configuration.CustomerNumber := _CustomerNumber;
+  configuration.ClientID := _ClientID;
+  configuration.ClientSecret := _ClientSecret;
+  configuration.ClientScope := _ClientScope;
+  configuration.GrantType := _GrantType;
+  configuration.DataPackagesSendMode := _DataPackagesSendMode;
+  Result := FindOrCreateConnection(_ConnectionName,configuration);
+  //Eine bestehende Verbindung wird weiterverwendet, die uebergebenen
+  //Zugangsdaten duerfen dabei aber nicht verlorengehen. Das geschieht
+  //ausserhalb der Listensperre: SetCredentials wartet auf die Sperre der
+  //Verbindung, und die haelt ein laufender Abruf bis zu seinem Timeout. So
+  //lange stuenden sonst alle Verbindungen still.
+  Result.SetCredentials(_Username,_Password,_CustomerNumber,_ClientID,
+    _ClientSecret,_ClientScope,_GrantType,_DataPackagesSendMode);
 end;
 
 class function TOpenMasterdataApiClient.RemoveOpenMasterdataConnection(
@@ -843,6 +1148,9 @@ begin
   //nie stattfaende. Die Antwort ist zu diesem Zeitpunkt bereits vollstaendig
   //gefuellt, der Code wertet sie selbst aus.
   FRESTClientOAuth.RaiseExceptionOn500 := false;
+  //Weiterleitungen nehmen Header und Formular mit, also Token oder
+  //Zugangsdaten, auch zu einem fremden Host. Kein Lieferant braucht sie.
+  FRESTClientOAuth.HandleRedirects := false;
   FRESTClientBySupplierPID.RaiseExceptionOn500 := false;
   FRESTClientByManufacturerData.RaiseExceptionOn500 := false;
   FRESTClientByGTIN.RaiseExceptionOn500 := false;
@@ -854,7 +1162,7 @@ begin
 
   FAccessToken := '';
   FRefreshToken := '';
-  FAccessTokenValidTo := 0;
+  FAccessTokenValidUntil := 0;
   //FCookie := '';
 
   //Zwei Wiederholungen bei Ueberlast, dazwischen 1 und 2 Sekunden. Laengere
@@ -877,7 +1185,14 @@ end;
 
 function TOpenMasterdataApiClient.GetLastBySupplierPIDResponseContent: String;
 begin
-  Result := FLastBySupplierPIDResponseContent;
+  //Ohne Sperre koennte ein Abruf den String freigeben, waehrend er hier
+  //gelesen wird
+  FCS.Acquire;
+  try
+    Result := FLastBySupplierPIDResponseContent;
+  finally
+    FCS.Release;
+  end;
 end;
 
 function TOpenMasterdataApiClient.GetLastErrorCode: Integer;
@@ -887,18 +1202,32 @@ end;
 
 function TOpenMasterdataApiClient.GetLastErrorMessage: String;
 begin
-  Result := FLastErrorMessage;
+  //Ohne Sperre koennte ein Abruf den String freigeben, waehrend er hier
+  //gelesen wird
+  FCS.Acquire;
+  try
+    Result := FLastErrorMessage;
+  finally
+    FCS.Release;
+  end;
 end;
 
 function TOpenMasterdataApiClient.GetLastOAuthResponseContent: String;
 begin
-  Result := FLastOAuthResponseContent;
+  //Ohne Sperre koennte ein Abruf den String freigeben, waehrend er hier
+  //gelesen wird
+  FCS.Acquire;
+  try
+    Result := FLastOAuthResponseContent;
+  finally
+    FCS.Release;
+  end;
 end;
 
 function TOpenMasterdataApiClient.LoggedIn: Boolean;
 begin
   Result := false;
-  if (not FAccessToken.IsEmpty) and (now < FAccessTokenValidTo) then
+  if (not FAccessToken.IsEmpty) and (TThread.GetTickCount64 < FAccessTokenValidUntil) then
   begin
     Result := true;
     exit;
@@ -906,7 +1235,7 @@ begin
   if FAccessToken.IsEmpty then
     Result := Login
   else
-  if FAccessTokenValidTo <= now then
+  if FAccessTokenValidUntil <= TThread.GetTickCount64 then
   begin
     if FRefreshToken.IsEmpty then
       Result := Login
@@ -1015,7 +1344,7 @@ begin
   end;
 end;
 
-function TOpenMasterdataApiClient.CalculateTokenValidTo(_ExpiresInSeconds: Integer): TDateTime;
+function TOpenMasterdataApiClient.CalculateTokenValidUntil(_ExpiresInSeconds: Integer): UInt64;
 const
   CDefaultLifetimeSeconds = 3600; //Annahme, wenn der Server keine Laufzeit meldet
   CSafetyMarginSeconds = 30;
@@ -1026,23 +1355,14 @@ begin
   //Token sofort als abgelaufen und jede Abfrage loest einen Login aus
   if _ExpiresInSeconds > CSafetyMarginSeconds*2 then
     _ExpiresInSeconds := _ExpiresInSeconds - CSafetyMarginSeconds;
-  Result := IncSecond(now,_ExpiresInSeconds);
+  Result := TThread.GetTickCount64 + UInt64(_ExpiresInSeconds)*1000;
 end;
 
-function TOpenMasterdataApiClient.ReadEndpointUrl(_Endpoint: TEndpointKind): String;
+procedure TOpenMasterdataApiClient.DiscardTokens;
 begin
-  FCS.Acquire;
-  try
-    case _Endpoint of
-      epBySupplierPid:      Result := FBySupplierPIDUrl;
-      epByManufacturerData: Result := FByManufacturerDataUrl;
-      epByGTIN:             Result := FByGTINUrl;
-    else
-      Result := '';
-    end;
-  finally
-    FCS.Release;
-  end;
+  FAccessToken := '';
+  FRefreshToken := '';
+  FAccessTokenValidUntil := 0;
 end;
 
 //Wartet, ohne die Sperre zu halten, und meldet zurueck, ob die Konfiguration
@@ -1138,9 +1458,14 @@ var
 
   itm : TOpenMasterdataAPI_AuthResult;
   authError,loginName : String;
+  //Vor dem Leeren der Tokens festgehalten: alles, was in keiner Meldung
+  //stehen darf
+  secrets : TArray<String>;
 begin
   //https://github.com/paolo-rossi/delphi-neon
   Result := false;
+  secrets := OwnSecrets;
+  try
 
   FLastOAuthResponseContent := '';
   FLastErrorMessage := '';
@@ -1151,6 +1476,14 @@ begin
   //FCookie := '';
 
   //TOAuth2Authenticator?
+
+  //Ohne Basisadresse ginge der Request an keinen oder, mit einer frueheren
+  //Konfiguration, an den falschen Host
+  if FRESTClientOAuth.BaseURL.IsEmpty then
+  begin
+    FLastErrorMessage := 'Es ist keine gueltige OAuth-URL konfiguriert.';
+    exit;
+  end;
 
   RESTResponse := TRESTResponse.Create(nil);
   RESTRequest := TRESTRequest.Create(nil);
@@ -1204,25 +1537,31 @@ begin
       //RFC 6749 Abschnitt 5.2 laesst Fehler mit Status 400 beantworten, das ist
       //der Regelfall. Ohne diese Auswertung stuende hier der rohe Koerper samt
       //allem, was der Server hineinschreibt.
-      FLastErrorMessage := Trim(RESTResponse.StatusText+' '+
-                                OAuthJsonErrorMessage(RESTResponse.Content));
+      if IsRedirectStatus(RESTResponse.StatusCode) then
+        FLastErrorMessage := RedirectMessage(ResolveLocation(RESTResponse.FullRequestURI,
+                               RESTResponse.Headers.Values['Location']))
+      else
+        FLastErrorMessage := Trim(MaskSecrets(RESTResponse.StatusText,secrets)+' '+
+                                  OAuthDetail(MaskSecrets(RESTResponse.Content,secrets)));
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    FAccessTokenValidTo := now;
-    if not TryLoadAuthResult(FLastOAuthResponseContent,itm,authError) then
+    FAccessTokenValidUntil := 0;
+    if not TryLoadAuthResult(FLastOAuthResponseContent,
+             MaskSecrets(FLastOAuthResponseContent,secrets),itm,authError) then
     begin
-      FLastErrorMessage := authError;
+      //Auch die Meldung des Parsers kann Text der Antwort enthalten
+      FLastErrorMessage := MaskSecrets(authError,secrets);
       exit;
     end;
 
     try
       FAccessToken := itm.access_token;
       FRefreshToken := itm.refresh_token;
-      FAccessTokenValidTo := CalculateTokenValidTo(itm.expires_in);
+      FAccessTokenValidUntil := CalculateTokenValidUntil(itm.expires_in);
       //if RESTResponse.Cookies.Count > 0 then
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
@@ -1234,6 +1573,12 @@ begin
     RESTRequest.Free;
     RESTResponse.Free;
   end;
+  finally
+    //Ausgangskontrolle: auch was hinter der Quelle zusammengesetzt wurde,
+    //etwa nach dem Entfernen von HTML-Tags, und Geheimnisse, die erst waehrend
+    //des Aufrufs entstanden sind
+    FLastErrorMessage := MaskSecrets(FLastErrorMessage,secrets + OwnSecrets);
+  end;
 end;
 
 function TOpenMasterdataApiClient.RefreshLogin: Boolean;
@@ -1243,9 +1588,12 @@ var
 
   itm : TOpenMasterdataAPI_AuthResult;
   authError : String;
+  secrets : TArray<String>;
 begin
   //https://github.com/paolo-rossi/delphi-neon
   Result := false;
+  secrets := OwnSecrets;
+  try
 
   FLastOAuthResponseContent := '';
   FLastErrorMessage := '';
@@ -1253,7 +1601,7 @@ begin
 
   FAccessToken := '';
   //FCookie := '';
-  if FRefreshToken.IsEmpty then
+  if FRefreshToken.IsEmpty or FRESTClientOAuth.BaseURL.IsEmpty then
     exit;
 
   RESTResponse := TRESTResponse.Create(nil);
@@ -1288,18 +1636,24 @@ begin
       //RFC 6749 Abschnitt 5.2 laesst Fehler mit Status 400 beantworten, das ist
       //der Regelfall. Ohne diese Auswertung stuende hier der rohe Koerper samt
       //allem, was der Server hineinschreibt.
-      FLastErrorMessage := Trim(RESTResponse.StatusText+' '+
-                                OAuthJsonErrorMessage(RESTResponse.Content));
+      if IsRedirectStatus(RESTResponse.StatusCode) then
+        FLastErrorMessage := RedirectMessage(ResolveLocation(RESTResponse.FullRequestURI,
+                               RESTResponse.Headers.Values['Location']))
+      else
+        FLastErrorMessage := Trim(MaskSecrets(RESTResponse.StatusText,secrets)+' '+
+                                  OAuthDetail(MaskSecrets(RESTResponse.Content,secrets)));
       FLastErrorCode := RESTResponse.StatusCode;
       exit;
     end;
 
     FLastOAuthResponseContent := RESTResponse.Content;
 
-    FAccessTokenValidTo := now;
-    if not TryLoadAuthResult(FLastOAuthResponseContent,itm,authError) then
+    FAccessTokenValidUntil := 0;
+    if not TryLoadAuthResult(FLastOAuthResponseContent,
+             MaskSecrets(FLastOAuthResponseContent,secrets),itm,authError) then
     begin
-      FLastErrorMessage := authError;
+      //Auch die Meldung des Parsers kann Text der Antwort enthalten
+      FLastErrorMessage := MaskSecrets(authError,secrets);
       exit;
     end;
 
@@ -1315,7 +1669,7 @@ begin
       //Rotiert der Server nicht, bleibt das bisherige gueltig.
       if not itm.refresh_token.IsEmpty then
         FRefreshToken := itm.refresh_token;
-      FAccessTokenValidTo := CalculateTokenValidTo(itm.expires_in);
+      FAccessTokenValidUntil := CalculateTokenValidUntil(itm.expires_in);
       //if RESTResponse.Cookies.Count > 0 then
       //  FCookie := RESTResponse.Cookies[0].GetServerCookie;
 
@@ -1326,6 +1680,12 @@ begin
   finally
     RESTRequest.Free;
     RESTResponse.Free;
+  end;
+  finally
+    //Ausgangskontrolle: auch was hinter der Quelle zusammengesetzt wurde,
+    //etwa nach dem Entfernen von HTML-Tags, und Geheimnisse, die erst waehrend
+    //des Aufrufs entstanden sind
+    FLastErrorMessage := MaskSecrets(FLastErrorMessage,secrets + OwnSecrets);
   end;
 end;
 
@@ -1338,7 +1698,7 @@ var
 begin
   //Status und Meldung bleiben hier ueber GetLastErrorCode abfragbar, wie
   //bisher. Eindeutig sind sie nur in FetchBySupplierPid.
-  Result := ExecuteProductRequest(FRESTClientBySupplierPID,ReadEndpointUrl(epBySupplierPid),
+  Result := ExecuteProductRequest(epBySupplierPid,
     'supplierPid',_SupplierPid,_DataPackages,_Result,statusCode,errorMessage);
 end;
 
@@ -1350,7 +1710,7 @@ var
   statusCode : Integer;
   errorMessage : String;
 begin
-  Result := ExecuteProductRequest(FRESTClientByManufacturerData,ReadEndpointUrl(epByManufacturerData),
+  Result := ExecuteProductRequest(epByManufacturerData,
     'manufacturerId',_ManufacturerId,
     'manufacturerIdType',_ManufacturerIdType,
     'manufacturerPid',_ManufacturerPid,
@@ -1364,21 +1724,21 @@ var
   statusCode : Integer;
   errorMessage : String;
 begin
-  Result := ExecuteProductRequest(FRESTClientByGTIN,ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+  Result := ExecuteProductRequest(epByGTIN,'gtin',_GTIN,
     _DataPackages,_Result,statusCode,errorMessage);
 end;
 
-function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
-  const _Resource, _IdentifierName, _IdentifierValue : String;
+function TOpenMasterdataApiClient.ExecuteProductRequest(_Endpoint : TEndpointKind;
+  const _IdentifierName, _IdentifierValue : String;
   _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
   out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
 begin
-  Result := ExecuteProductRequest(_RestClient,_Resource,_IdentifierName,_IdentifierValue,
+  Result := ExecuteProductRequest(_Endpoint,_IdentifierName,_IdentifierValue,
               '','','','',_DataPackages,_Result,_StatusCode,_ErrorMessage);
 end;
 
-function TOpenMasterdataApiClient.ExecuteProductRequest(_RestClient : TRESTClient;
-  const _Resource, _IdentifierName1, _IdentifierValue1, _IdentifierName2,
+function TOpenMasterdataApiClient.ExecuteProductRequest(_Endpoint : TEndpointKind;
+  const _IdentifierName1, _IdentifierValue1, _IdentifierName2,
   _IdentifierValue2, _IdentifierName3, _IdentifierValue3 : String;
   _DataPackages : TOpenMasterdataAPI_DataPackages; out _Result: TOpenMasterdataAPI_Result;
   out _StatusCode : Integer; out _ErrorMessage : String) : Boolean;
@@ -1393,6 +1753,11 @@ var
   //der Luecke sein eigenes Ergebnis hinein.
   localStatusCode : Integer;
   localErrorMessage : String;
+  restClient : TRESTClient;
+  resource : String;
+  //Vor dem Abruf festgehalten: bei 401 und 403 wird der Token unten geleert,
+  //bevor die Meldung entsteht, und koennte sonst unmaskiert hineingeraten
+  secrets : TArray<String>;
 
   //Haelt beide Staende im Gleichlauf: den geteilten fuer GetLastErrorMessage
   //und den eigenen fuer die Rueckgabe.
@@ -1401,6 +1766,7 @@ var
     localErrorMessage := _Message;
     FLastErrorMessage := _Message;
   end;
+
 
 begin
   Result := false;
@@ -1427,7 +1793,18 @@ begin
   FLastErrorMessage := '';
   FLastErrorCode := 0;
 
-  if (_RestClient = nil) or _Resource.IsEmpty then
+  secrets := OwnSecrets;
+
+  case _Endpoint of
+    epBySupplierPid:      begin restClient := FRESTClientBySupplierPID;      resource := FBySupplierPIDUrl;      end;
+    epByManufacturerData: begin restClient := FRESTClientByManufacturerData; resource := FByManufacturerDataUrl; end;
+    epByGTIN:             begin restClient := FRESTClientByGTIN;             resource := FByGTINUrl;             end;
+  else
+    restClient := nil;
+    resource := '';
+  end;
+
+  if (restClient = nil) or resource.IsEmpty then
   begin
     SetError('Fuer diese Abfrage ist keine URL konfiguriert.');
     exit;
@@ -1451,11 +1828,11 @@ begin
     RESTResponse.Name := 'RESTResponse';
     RESTRequest.Name := 'RESTRequest';
     RESTRequest.AssignedValues := [TCustomRESTRequest.TAssignedValue.rvConnectTimeout, TCustomRESTRequest.TAssignedValue.rvReadTimeout];
-    RESTRequest.Client := _RestClient;
+    RESTRequest.Client := restClient;
     if FDataPackagesSendMode = TDataPackagesSendMode.omddpsm_Exploded then
-      RESTRequest.Resource := BuildExplodedDataPackageResource(_Resource,_DataPackages)
+      RESTRequest.Resource := BuildExplodedDataPackageResource(resource,_DataPackages)
     else
-      RESTRequest.Resource := _Resource;
+      RESTRequest.Resource := resource;
     RESTRequest.AddAuthParameter('Authorization','Bearer ' + FAccessToken,TRESTRequestParameterKind.pkHTTPHEADER, [TRESTRequestParameterOption.poDoNotEncode]);
     //if FCookie <> '' then
     //  RESTRequest.AddAuthParameter('Cookie',FCookie,TRESTRequestParameterKind.pkCOOKIE, [TRESTRequestParameterOption.poDoNotEncode]);
@@ -1496,7 +1873,14 @@ begin
     if (RESTResponse.StatusCode = 401) or (RESTResponse.StatusCode = 403) then
     begin
       FAccessToken := '';
-      FAccessTokenValidTo := 0;
+      FAccessTokenValidUntil := 0;
+    end;
+
+    if IsRedirectStatus(RESTResponse.StatusCode) then
+    begin
+      SetError(RedirectMessage(ResolveLocation(RESTResponse.FullRequestURI,
+        RESTResponse.Headers.Values['Location'])));
+      exit;
     end;
 
     //Die Spec 9.0.0 liefert zu 950 und 951 ein vollstaendiges Produkt:
@@ -1506,20 +1890,27 @@ begin
             (RESTResponse.StatusCode = COpenMasterdataStatusSuccessorProduct)) then
     begin
       SetError(AppendResponseDetail(
-        StatusCodeToMessage(RESTResponse.StatusCode,RESTResponse.StatusText),
-        RESTResponse.Content));
+        StatusCodeToMessage(RESTResponse.StatusCode,MaskSecrets(RESTResponse.StatusText,secrets)),
+        MaskSecrets(RESTResponse.Content,secrets)));
       FLastBySupplierPIDResponseContent := RESTResponse.Content;
       exit;
     end;
 
     FLastBySupplierPIDResponseContent := RESTResponse.Content;
 
+    if IsObjectWithoutProduct(RESTResponse.Content) then
+    begin
+      SetError(AppendResponseDetail('Die Antwort enthaelt kein Produkt.',
+        MaskSecrets(RESTResponse.Content,secrets)));
+      exit;
+    end;
+
     _Result := TOpenMasterdataAPI_Result.Create;
     try
       if not _Result.TryLoadFromJson(RESTResponse.Content,parseError) then
       begin
         FreeAndNil(_Result);
-        SetError(parseError);
+        SetError(MaskSecrets(parseError,secrets));
         exit;
       end;
       //Erst ab OM 11 fuehrt die Antwort den Status als Feld. Fehlt er, wird der
@@ -1544,6 +1935,10 @@ begin
   finally
     //Aus den eigenen Variablen, nicht aus den geteilten Feldern. Das finally
     //laeuft auch bei jedem vorzeitigen exit.
+    //Ausgangskontrolle wie in Login. Der Token kann waehrend einer Wartezeit
+    //erneuert worden sein, deshalb zaehlen auch die aktuellen Geheimnisse.
+    localErrorMessage := MaskSecrets(localErrorMessage,secrets + OwnSecrets);
+    FLastErrorMessage := MaskSecrets(FLastErrorMessage,secrets + OwnSecrets);
     _StatusCode := localStatusCode;
     _ErrorMessage := localErrorMessage;
     FCS.Release;
@@ -1608,8 +2003,7 @@ begin
   //Status und Meldung kommen aus dem Abruf selbst, noch unter dessen Sperre
   //eingesammelt. Ueber GetLastErrorCode gelesen koennten sie von einem
   //anderen Thread stammen.
-  Result.Success := ExecuteProductRequest(FRESTClientBySupplierPID,
-                      ReadEndpointUrl(epBySupplierPid),'supplierPid',_SupplierPid,
+  Result.Success := ExecuteProductRequest(epBySupplierPid,'supplierPid',_SupplierPid,
                       _DataPackages,Result.Product,
                       Result.StatusCode,Result.ErrorMessage);
   if Result.Success then
@@ -1631,8 +2025,7 @@ function TOpenMasterdataApiClient.FetchByGTIN(const _GTIN : String;
   _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
 begin
   Result := Default(TOpenMasterdataResponse);
-  Result.Success := ExecuteProductRequest(FRESTClientByGTIN,
-                      ReadEndpointUrl(epByGTIN),'gtin',_GTIN,
+  Result.Success := ExecuteProductRequest(epByGTIN,'gtin',_GTIN,
                       _DataPackages,Result.Product,
                       Result.StatusCode,Result.ErrorMessage);
   if Result.Success then
@@ -1653,8 +2046,7 @@ function TOpenMasterdataApiClient.FetchByManufacturerData(const _ManufacturerId,
   _DataPackages : TOpenMasterdataAPI_DataPackages) : TOpenMasterdataResponse;
 begin
   Result := Default(TOpenMasterdataResponse);
-  Result.Success := ExecuteProductRequest(FRESTClientByManufacturerData,
-                      ReadEndpointUrl(epByManufacturerData),
+  Result.Success := ExecuteProductRequest(epByManufacturerData,
                       'manufacturerId',_ManufacturerId,
                       'manufacturerIdType',_ManufacturerIdType,
                       'manufacturerPid',_ManufacturerPid,
@@ -1746,6 +2138,11 @@ var
   lResponse : IHTTPResponse;
   lAttempt : Integer;
   lDelayMilliseconds : Integer;
+  lUrl : String;
+  lRedirects : Integer;
+  lSecrets : TArray<String>;
+const
+  CMaxRedirects = 5;
 begin
   Result := false;
   _Result := nil;
@@ -1761,18 +2158,43 @@ begin
 
   FLastErrorMessage := '';
   FLastErrorCode := 0;
+  lSecrets := OwnSecrets;
 
   lHttp := THTTPClient.Create;
   lData := TMemoryStream.Create;
   try
     try
-      lHeaders := [TNetHeader.Create('Authorization','Bearer ' + FAccessToken)];
+      //Bilder und Dokumente liegen oft auf fremden Servern, ihre Adressen
+      //stammen aus der Lieferantenantwort. Der Token geht nur an den Ursprung
+      //eines konfigurierten Endpunkts, alles andere wird ohne ihn abgerufen.
+      //Weiterleitungen folgt der Code selbst, damit diese Pruefung auch fuer
+      //das Ziel einer Weiterleitung gilt.
+      lHttp.HandleRedirects := false;
+      lUrl := _Url;
+      lRedirects := 0;
       lAttempt := 0;
       repeat
+        if TokenAllowedFor(lUrl) then
+        begin
+          lHeaders := [TNetHeader.Create('Authorization','Bearer ' + FAccessToken)];
+          //Den tatsaechlich gesendeten Token festhalten: waehrend einer
+          //Wartezeit kann ein anderer Abruf ihn erneuert haben, und bei 401
+          //oder 403 wird er unten verworfen, bevor die Meldung geprueft ist
+          lSecrets := lSecrets + [FAccessToken];
+        end
+        else
+          lHeaders := [];
         //Bei einem Wiederholungsversuch muss der Stream wieder leer sein,
         //sonst haengt die zweite Antwort an der ersten
         lData.Clear;
-        lResponse := lHttp.Get(_URL,lData,lHeaders);
+        lResponse := lHttp.Get(lUrl,lData,lHeaders);
+        if IsRedirectStatus(lResponse.StatusCode) and (lRedirects < CMaxRedirects) and
+           (ResolveLocation(lUrl,lResponse.HeaderValue['Location']) <> '') then
+        begin
+          lUrl := ResolveLocation(lUrl,lResponse.HeaderValue['Location']);
+          Inc(lRedirects);
+          continue;
+        end;
         Result := lResponse.StatusCode = 200;
         //Auch nach einem zuvor gescheiterten Versuch muss der Code stimmen
         if Result then
@@ -1801,12 +2223,13 @@ begin
       begin
         //Der Antwortkoerper steht hier schon im Zielpuffer des Downloads und
         //ist deshalb nicht mehr als Meldung verwertbar
-        FLastErrorMessage := StatusCodeToMessage(lResponse.StatusCode,lResponse.StatusText);
+        FLastErrorMessage := StatusCodeToMessage(lResponse.StatusCode,
+                               MaskSecrets(lResponse.StatusText,lSecrets));
         //Ein zurueckgezogener Token muss auch hier verworfen werden
         if (lResponse.StatusCode = 401) or (lResponse.StatusCode = 403) then
         begin
           FAccessToken := '';
-          FAccessTokenValidTo := 0;
+          FAccessTokenValidUntil := 0;
         end;
       end;
     except
@@ -1821,6 +2244,9 @@ begin
   end;
 
   finally
+    //Ausgangskontrolle, unter anderem fuer Exceptions mit der vollstaendigen
+    //Adresse einer Weiterleitung
+    FLastErrorMessage := MaskSecrets(FLastErrorMessage,lSecrets + OwnSecrets);
     FCS.Release;
   end;
 end;
@@ -1885,63 +2311,106 @@ begin
   _RestClient.Accept := 'application/json';
   _RestClient.AcceptCharSet := 'UTF-8';
   _RestClient.ContentType := 'application/json';
-  _RestClient.HandleRedirects := true;
+  //Siehe Konstruktor: Weiterleitungen trugen den Token zu jedem Ziel
+  _RestClient.HandleRedirects := false;
+end;
+
+procedure TOpenMasterdataApiClient.ApplyEndpointUrl(const _URL : String;
+  _RestClient : TRESTClient; var _Resource, _Source : String; _ProductEndpoint : Boolean);
+var
+  resource, baseUrl : String;
+begin
+  //Leer oder ungueltig schaltet den Endpunkt ab, einschliesslich der
+  //Basisadresse. Bliebe sie stehen, ginge der naechste Request mit leerer
+  //Resource an den Host der vorigen Konfiguration.
+  if not TrySplitEndpointUrl(_URL,resource,baseUrl) then
+  begin
+    resource := '';
+    baseUrl := '';
+  end;
+  //Ein Token gilt fuer den Server, der ihn ausgestellt hat. Aendert sich eine
+  //Adresse, wird er verworfen, statt an einen anderen Host zu gehen.
+  if _URL <> _Source then
+    DiscardTokens;
+  _Source := _URL;
+  _Resource := resource;
+  if _ProductEndpoint then
+    SetupProductRestClient(_RestClient,baseUrl)
+  else
+    _RestClient.BaseURL := baseUrl;
+  Inc(FConfigGeneration);
+end;
+
+function TOpenMasterdataApiClient.OwnSecrets : TArray<String>;
+begin
+  Result := [FPassword,FClientSecret,FAccessToken,FRefreshToken];
+end;
+
+function TOpenMasterdataApiClient.TokenAllowedFor(const _Url : String) : Boolean;
+var
+  clients : array[0..2] of TRESTClient;
+  restClient : TRESTClient;
+  base : TURI;
+begin
+  Result := false;
+  clients[0] := FRESTClientBySupplierPID;
+  clients[1] := FRESTClientByManufacturerData;
+  clients[2] := FRESTClientByGTIN;
+  for restClient in clients do
+  begin
+    if restClient.BaseURL.IsEmpty then
+      continue;
+    try
+      base := TURI.Create(restClient.BaseURL);
+    except
+      on E:Exception do
+        continue;
+    end;
+    if IsSameOrigin(_Url,base.Scheme,base.Host,base.Port) then
+      exit(true);
+  end;
 end;
 
 //Die Setter laufen wie die Requests unter FCS, damit die Konfiguration nicht
 //mitten in einer laufenden Abfrage aus einem anderen Thread wechselt.
 procedure TOpenMasterdataApiClient.SetBySupplierPIDURL(
   const _URL : String);
-var
-  baseUrl : String;
 begin
   FCS.Acquire;
   try
-    if TrySplitEndpointUrl(_URL,FBySupplierPIDUrl,baseUrl) then
-      SetupProductRestClient(FRESTClientBySupplierPID,baseUrl);
-    Inc(FConfigGeneration);
+    ApplyEndpointUrl(_URL,FRESTClientBySupplierPID,FBySupplierPIDUrl,
+      FBySupplierPIDUrlSource,true);
   finally
     FCS.Release;
   end;
 end;
 
 procedure TOpenMasterdataApiClient.SetByManufacturerDataURL(const _URL: String);
-var
-  baseUrl : String;
 begin
   FCS.Acquire;
   try
-    if TrySplitEndpointUrl(_URL,FByManufacturerDataUrl,baseUrl) then
-      SetupProductRestClient(FRESTClientByManufacturerData,baseUrl);
-    Inc(FConfigGeneration);
+    ApplyEndpointUrl(_URL,FRESTClientByManufacturerData,FByManufacturerDataUrl,
+      FByManufacturerDataUrlSource,true);
   finally
     FCS.Release;
   end;
 end;
 
 procedure TOpenMasterdataApiClient.SetByGTINURL(const _URL: String);
-var
-  baseUrl : String;
 begin
   FCS.Acquire;
   try
-    if TrySplitEndpointUrl(_URL,FByGTINUrl,baseUrl) then
-      SetupProductRestClient(FRESTClientByGTIN,baseUrl);
-    Inc(FConfigGeneration);
+    ApplyEndpointUrl(_URL,FRESTClientByGTIN,FByGTINUrl,FByGTINUrlSource,true);
   finally
     FCS.Release;
   end;
 end;
 
 procedure TOpenMasterdataApiClient.SetOAuthURL(const _URL : String);
-var
-  baseUrl : String;
 begin
   FCS.Acquire;
   try
-    if TrySplitEndpointUrl(_URL,FOAuthUrl,baseUrl) then
-      FRESTClientOAuth.BaseURL := baseUrl;
-    Inc(FConfigGeneration);
+    ApplyEndpointUrl(_URL,FRESTClientOAuth,FOAuthUrl,FOAuthUrlSource,false);
   finally
     FCS.Release;
   end;
@@ -1982,7 +2451,7 @@ begin
     //Mit geaenderten Zugangsdaten ist der bisherige Token nicht mehr gueltig
     FAccessToken := '';
     FRefreshToken := '';
-    FAccessTokenValidTo := 0;
+    FAccessTokenValidUntil := 0;
     Inc(FConfigGeneration);
   finally
     FCS.Release;

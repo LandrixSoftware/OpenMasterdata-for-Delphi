@@ -34,7 +34,9 @@ CodeGen
 Testresponses
 .vscode
 
-backlog.md 
+BACKLOG.md
+CHANGELOG.md
+CLAUDE.md
 
 GPATH
 GRTAGS

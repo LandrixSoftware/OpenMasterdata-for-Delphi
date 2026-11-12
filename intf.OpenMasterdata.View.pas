@@ -351,6 +351,19 @@ var
       Result := HtmlEncode(trimmedValue);
   end;
 
+  //Ohne Preisbasis liest man einen Stueckpreis: FEGA liefert etwa 222,70 EUR
+  //je 100 Stueck, angezeigt waere ein um den Faktor 100 zu hoher Preis
+  function PriceText(_Price : TOpenMasterdataAPI_Price) : String;
+  begin
+    Result := Format('%n %s',[_Price.ValueAsCurrency,HtmlEncode(_Price.currency)]);
+    if (_Price.basis > 1) or (_Price.quantityUnit <> '') then
+      Result := Result+' je';
+    if _Price.basis > 1 then
+      Result := Result+' '+IntToStr(_Price.basis);
+    if _Price.quantityUnit <> '' then
+      Result := Result+' '+HtmlEncode(_Price.quantityUnit);
+  end;
+
   procedure AddLinkedProductHtml(_Item : TOpenMasterdataAPI_LinkedProduct; const _ReferenceType : String = '');
   var
     imageUrl : String;
@@ -451,9 +464,9 @@ begin
     if (_Val.basic.priceOnDemand) then
       html.Add('Preis nur auf Anfrage.<br/>');
     if (_Val.prices.listPrice.ValueAsCurrency > 0) then
-      html.Add('Listenpreis: '+Format('%n %s',[_Val.prices.listPrice.ValueAsCurrency,HtmlEncode(_Val.prices.listPrice.currency)])+'<br/>');
+      html.Add('Listenpreis: '+PriceText(_Val.prices.listPrice)+'<br/>');
     if (_Val.prices.netPrice.ValueAsCurrency > 0) then
-      html.Add('Einkaufspreis: '+Format('%n %s',[_Val.prices.netPrice.ValueAsCurrency,HtmlEncode(_Val.prices.netPrice.currency)])+'<br/>');
+      html.Add('Einkaufspreis: '+PriceText(_Val.prices.netPrice)+'<br/>');
 
     html.Add('<br/>');
     if _Val.prices.rawMaterial.Count > 0 then

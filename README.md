@@ -272,3 +272,9 @@ Geändertes Verhalten bei gleicher Signatur:
  - `AsHtml` reicht Lieferanten-HTML nicht mehr unverändert durch. Nicht freigegebene Tags und sämtliche Attribute werden entfernt, Adressen nur mit den Schemata `http`, `https` und `mailto` verlinkt.
  - `AsHtml` gibt zusätzlich `descriptions.marketingText` aus, sofern er nicht mit `productDescr` übereinstimmt. Einige Lieferanten führen die Beschreibung ausschließlich dort; bisher blieb sie unsichtbar. Freigegeben sind jetzt auch `u`, `i`, `h3`, `h4`, `h5` und `hr` — `h1` und `h2` bleiben der Ansicht selbst vorbehalten.
  - Fehlgeschlagene Bild- und Dokumentdownloads werden nicht mehr zwischengespeichert, sondern beim nächsten Zugriff erneut versucht.
+ - HTTP-Weiterleitungen werden bei Anmeldung und Artikelabruf nicht mehr verfolgt. Sie hätten Token und Zugangsdaten an jedes Ziel mitgenommen. Antwortet ein Server mit einer Weiterleitung, scheitert der Abruf mit einer Meldung, die den Zielhost nennt; dann ist die konfigurierte URL anzupassen.
+ - `GetData` sendet den Zugriffstoken nur noch an Adressen mit demselben Ursprung (Schema, Host, Port) wie ein konfigurierter Artikelendpunkt. Bilder und Dokumente auf anderen Servern werden ohne Token abgerufen. Weiterleitungen folgt `GetData` selbst und prüft dabei jedes Ziel erneut.
+ - Ändert sich eine konfigurierte Adresse, wird der Token verworfen und beim nächsten Abruf neu angemeldet. Eine leere oder ungültige OAuth-URL führt zu einer Fehlermeldung statt zu einem Login am bisherigen Host.
+ - Eine Antwort mit Status 200, die kein Produktfeld enthält (etwa `{}` oder `{"error":…}`), gilt als Fehler und liefert kein Produkt.
+ - Datumswerte im ISO-Format gelten als der geschriebene Kalendertag. Uhrzeit und Zeitzone werden nicht mehr umgerechnet; vorher konnte ein Datum je nach Zeitzone auf den Vortag oder Folgetag fallen.
+ - `AsHtml` zeigt bei Preisen Preisbasis und Mengeneinheit an, etwa „222,70 EUR je 100 PCE“.
